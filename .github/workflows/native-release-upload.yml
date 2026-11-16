@@ -7,6 +7,8 @@ permissions:
   contents: write
 jobs:
   windows:
+    permissions:
+      contents: read
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +21,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'staging/output/Jyotish-Studio-Setup-3.1.0.exe').Path
+          $release = Get-Content 'staging/manifest.json' | ConvertFrom-Json
+          $installerName = ($release.assets | Where-Object { $_.name -like 'Jyotish-Studio-Setup-*.exe' }).name
+          $installer = (Resolve-Path (Join-Path 'staging/output' $installerName)).Path
           $profile = Join-Path $env:APPDATA 'Jyotish Studio Offline'
           New-Item -ItemType Directory -Force $profile | Out-Null
           Set-Content (Join-Path $profile 'installer-preservation-check.txt') 'retained'
