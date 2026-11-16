@@ -16,7 +16,7 @@ jobs:
         run: python scripts/assemble-release.py
       - name: Install Playwright controller
         shell: pwsh
-        run: npm install --prefix "$env:RUNNER_TEMP/pw" --ignore-scripts --no-audit --no-fund playwright@1.56.1
+        run: npm install --prefix "$env:RUNNER_TEMP/pw" --ignore-scripts --no-audit --no-fund playwright@1.62.0
       - name: Install, launch, reinstall and verify local chart data
         shell: pwsh
         run: |
