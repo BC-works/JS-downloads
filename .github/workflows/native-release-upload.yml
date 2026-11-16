@@ -7,6 +7,7 @@ permissions:
   contents: write
 jobs:
   windows:
+    timeout-minutes: 12
     permissions:
       contents: read
     runs-on: windows-latest
@@ -27,14 +28,20 @@ jobs:
           $profile = Join-Path $env:APPDATA 'Jyotish Studio Offline'
           New-Item -ItemType Directory -Force $profile | Out-Null
           Set-Content (Join-Path $profile 'installer-preservation-check.txt') 'retained'
-          $first = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          Write-Host 'Starting silent install'
+          $first = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
+          if (-not $first.WaitForExit(180000)) { Get-Process | Where-Object { $_.ProcessName -match 'Jyotish|nsis|electron' } | Select-Object Id,ProcessName,MainWindowTitle | Format-Table; taskkill /PID $first.Id /T /F; throw 'First installer timed out' }
+          Write-Host 'First installer finished'
           if ($first.ExitCode -ne 0) { throw "Installer exit code $($first.ExitCode)" }
           Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
           $exe = Get-ChildItem "$env:LOCALAPPDATA/Programs" -Filter JyotishStudio.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'Installed executable was not found' }
           node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" seed
           if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
-          $second = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          Write-Host 'Starting silent reinstall'
+          $second = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
+          if (-not $second.WaitForExit(180000)) { Get-Process | Where-Object { $_.ProcessName -match 'Jyotish|nsis|electron' } | Select-Object Id,ProcessName,MainWindowTitle | Format-Table; taskkill /PID $second.Id /T /F; throw 'Second installer timed out' }
+          Write-Host 'Second installer finished'
           if ($second.ExitCode -ne 0) { throw "Reinstall exit code $($second.ExitCode)" }
           Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
           node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" verify
