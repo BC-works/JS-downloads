@@ -7,6 +7,7 @@ permissions:
   contents: write
 jobs:
   windows:
+    if: ${{ !github.event.deleted }}
     timeout-minutes: 12
     permissions:
       contents: read
@@ -28,9 +29,27 @@ jobs:
           $profile = Join-Path $env:APPDATA 'Jyotish Studio Offline'
           New-Item -ItemType Directory -Force $profile | Out-Null
           Set-Content (Join-Path $profile 'installer-preservation-check.txt') 'retained'
+          Add-Type @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class NativeWindows {
+            public delegate bool Callback(IntPtr h, IntPtr p);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, Callback cb, IntPtr p);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+          }
+          '@
+          function Dump-InstallerWindows {
+            Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'Jyotish|uninstall|nsis|electron' } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | Format-List
+            Get-Process | Where-Object { $_.MainWindowTitle -and $_.ProcessName -match 'Jyotish|uninstall|nsis|electron' } | ForEach-Object {
+              Write-Host ('WINDOW '+$_.Id+' '+$_.MainWindowTitle)
+              [NativeWindows]::EnumChildWindows($_.MainWindowHandle, { param($h,$p) $text=New-Object Text.StringBuilder 4096; [void][NativeWindows]::GetWindowText($h,$text,4096); if($text.Length){Write-Host ('TEXT '+$text.ToString())}; return $true }, [IntPtr]::Zero) | Out-Null
+            }
+            Get-ChildItem "$env:LOCALAPPDATA/Programs" -Filter '*uninstall*.exe' -Recurse | Select-Object FullName,Length | Format-List
+          }
           Write-Host 'Starting silent install'
           $first = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
-          if (-not $first.WaitForExit(180000)) { Get-Process | Where-Object { $_.ProcessName -match 'Jyotish|nsis|electron' } | Select-Object Id,ProcessName,MainWindowTitle | Format-Table; taskkill /PID $first.Id /T /F; throw 'First installer timed out' }
+          if (-not $first.WaitForExit(180000)) { Dump-InstallerWindows; taskkill /PID $first.Id /T /F; throw 'First installer timed out' }
           Write-Host 'First installer finished'
           if ($first.ExitCode -ne 0) { throw "Installer exit code $($first.ExitCode)" }
           Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -40,7 +59,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
           Write-Host 'Starting silent reinstall'
           $second = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
-          if (-not $second.WaitForExit(180000)) { Get-Process | Where-Object { $_.ProcessName -match 'Jyotish|nsis|electron' } | Select-Object Id,ProcessName,MainWindowTitle | Format-Table; taskkill /PID $second.Id /T /F; throw 'Second installer timed out' }
+          if (-not $second.WaitForExit(180000)) { Dump-InstallerWindows; taskkill /PID $second.Id /T /F; throw 'Second installer timed out' }
           Write-Host 'Second installer finished'
           if ($second.ExitCode -ne 0) { throw "Reinstall exit code $($second.ExitCode)" }
           Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
