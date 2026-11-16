@@ -6,7 +6,38 @@ on:
 permissions:
   contents: write
 jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble verified installers
+        run: python scripts/assemble-release.py
+      - name: Install Playwright controller
+        shell: pwsh
+        run: npm install --prefix "$env:RUNNER_TEMP/pw" --ignore-scripts --no-audit --no-fund playwright@1.56.1
+      - name: Install, launch, reinstall and verify local chart data
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = (Resolve-Path 'staging/output/Jyotish-Studio-Setup-3.1.0.exe').Path
+          $profile = Join-Path $env:APPDATA 'Jyotish Studio Offline'
+          New-Item -ItemType Directory -Force $profile | Out-Null
+          Set-Content (Join-Path $profile 'installer-preservation-check.txt') 'retained'
+          $first = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          if ($first.ExitCode -ne 0) { throw "Installer exit code $($first.ExitCode)" }
+          Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
+          $exe = Get-ChildItem "$env:LOCALAPPDATA/Programs" -Filter JyotishStudio.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Installed executable was not found' }
+          node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" seed
+          if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
+          $second = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          if ($second.ExitCode -ne 0) { throw "Reinstall exit code $($second.ExitCode)" }
+          Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
+          node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" verify
+          if ($LASTEXITCODE -ne 0) { throw 'Post-reinstall chart check failed' }
+          if ((Get-Content (Join-Path $profile 'installer-preservation-check.txt')) -ne 'retained') { throw 'Profile was changed by installer' }
   upload:
+    needs: windows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
