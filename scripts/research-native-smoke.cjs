@@ -25,9 +25,9 @@ async function runResearchNative(page,{reopen=false}={}){
   await page.locator('[data-r-action=pin][data-r-result=main]').click();await page.locator('#research-dialog-name').fill('Native Moon sign result');await page.locator('#research-dialog-form textarea').fill('Frozen native Research evidence');await page.locator('#research-dialog-form button[type=submit]').click();await page.waitForFunction(()=>!document.querySelector('.research-dialog'));
  }
  await page.locator('[data-nav=chart]').click();
- const after=await page.evaluate(()=>({saved:localStorage.getItem('jyotish-studio.saved.v1'),history:localStorage.getItem('jyotish-studio.history.v1'),tabs:document.querySelectorAll('[data-chart-document]').length,worker:JyotishStateDiagnostics().research.engine}));
+ const after=await page.evaluate(()=>({saved:localStorage.getItem('jyotish-studio.saved.v1'),history:localStorage.getItem('jyotish-studio.history.v1'),tabs:document.querySelectorAll('[data-chart-document]').length,worker:JyotishStateDiagnostics().research.engine,retainedEvidence:JyotishStateDiagnostics().research.workspace.retainedEvidenceCharts}));
  if(after.saved!==original.saved||after.history!==original.history||after.tabs!==original.tabs)throw Error('Research changed Saved, History or main chart tabs');
- if(after.worker.worker||after.worker.pending)throw Error('Research worker was retained after leaving the workspace');
+ if(after.worker.worker||after.worker.pending||after.retainedEvidence!==0)throw Error('Research worker or evidence was retained after leaving the workspace');
  console.log(JSON.stringify({nativeResearch:true,reopen,customOrigin:page.url(),numericWorker:true,inspectorD9:true,pinned:true,isolatedLibraries:true,releasedWorker:true}));
 }
 module.exports={runResearchNative};
