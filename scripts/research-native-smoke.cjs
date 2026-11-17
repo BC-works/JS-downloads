@@ -17,7 +17,7 @@ async function runResearchNative(page,{reopen=false}={}){
  await page.locator('#research-question').fill('Distribution of Moon signs');await page.locator('#research-query-form button[type=submit]').click();await page.locator('[data-r-action=run-review]').click();
  await page.waitForFunction(()=>!document.querySelector('.research-progress')&&document.querySelector('.research-results'),null,{timeout:60000});
  const errors=await page.locator('.research-error').allTextContents();if(errors.length)throw Error('Native Research failed: '+errors.join('; '));
- if(!(await page.locator('.research-results .research-summary').first().innerText()).includes('1 eligible'))throw Error('Native Research denominator is wrong');
+ const summary=await page.locator('.research-results .research-summary').first().innerText(),eligible=await page.locator('.research-results .research-summary strong').first().innerText();if(Number(eligible)!==1)throw Error('Native Research denominator is wrong: '+JSON.stringify({summary,eligible}));
  await page.locator('[data-r-finding]').first().click();await page.locator('.research-evidence [data-r-inspect]').first().click();await page.locator('.research-inspector svg').waitFor();
  await page.locator('[data-r-inspector-division="9"]').click();if((await page.locator('.research-inspector svg').getAttribute('aria-label'))!=='D9 South Indian chart')throw Error('Native Research division inspector failed');
  await page.locator('[data-r-action=close-inspector]').click();
