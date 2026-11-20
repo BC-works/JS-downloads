@@ -6,6 +6,7 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
  console.log('SMOKE launch');const app=await _electron.launch({executablePath:process.argv[2],timeout:60000});
  try{phase='first window';console.log('SMOKE first window');const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));phase='form';console.log('SMOKE wait for form');await page.waitForSelector('#birth-form',{timeout:60000});console.log('SMOKE form ready');
   if(await page.evaluate(()=>typeof require)!=='undefined')throw Error('Renderer has Node access');
+  if(process.argv[4]!=='baseline'&&await page.locator('#ayan').inputValue()!=='true-chitra')throw Error('New charts must default to True Chitra Lahiri');
   phase='updater status';console.log('SMOKE updater status');if((await page.evaluate(()=>JyotishDesktopUpdates.status())).currentVersion!==expectedVersion)throw Error('Wrong installed version');
   if(process.argv[4]!=='baseline'){
    phase='lookup startup';console.log('SMOKE real packaged lookup startup');
@@ -27,10 +28,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    await page.locator('#quick-save-calculation').click();await page.locator('#save-notes').fill('Retained through Windows reinstall');await page.locator('.modal button[type=submit]').click();
   }else{
    const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('jyotish-studio.saved.v1'))),chart=saved.charts.find(c=>c.name==='Windows Update Smoke');
-   if(!chart||chart.input.date!=='-001999-01-01'||chart.notes!=='Retained through Windows reinstall')throw Error('Saved Charts did not survive Windows reinstall');
+   if(!chart||chart.input.date!=='-001999-01-01'||chart.notes!=='Retained through Windows reinstall'||chart.input.ayan!=='lahiri')throw Error('Saved Charts did not survive Windows reinstall');
    const history=await page.evaluate(()=>JSON.parse(localStorage.getItem('jyotish-studio.history.v1')));if(!history.some(c=>c.input.date==='-001999-01-01'))throw Error('History did not survive reinstall');
   }
-  phase='research';console.log('SMOKE native Research '+process.argv[4]);await require('./research-native-smoke.cjs').runResearchNative(page,{reopen:process.argv[4]==='reopen',legacy:process.argv[4]==='baseline',expectExisting:process.argv[4]!=='baseline'});
+  phase='research';console.log('SMOKE native Research '+process.argv[4]);await require('./research-native-smoke.cjs').runResearchNative(page,{reopen:process.argv[4]==='reopen',legacy:false,expectExisting:process.argv[4]!=='baseline'});
   phase='update dialog';console.log('SMOKE update dialog');await page.locator('[data-menu=Help]').click();await page.locator('[data-menu-action=check-updates]').click();await page.waitForSelector('.native-update-dialog');
   if(await page.locator('.native-update-dialog footer button').count()!==1)throw Error('Update dialog has no bottom action');await page.locator('[data-update-close]').click();
   if(errors.length)throw Error(errors.join('; '));console.log(JSON.stringify({windowsNative:true,mode:process.argv[4],appVersion:expectedVersion,offlineBce:true,localData:true,nodeDisabled:true,updaterBridge:true,releaseDialog:true}));
