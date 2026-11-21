@@ -27,6 +27,40 @@ async function checkStoredCohort(page){
  }
 }
 
+async function verifyNativeOrbitAssets(page){
+ const images=await page.evaluate(async()=>{
+  return Promise.all(['orbital-sky','orbital-strip','lotus-wordmark'].map(async name=>{
+   const image=new Image();
+   image.src='/assets/research/'+name+'.webp';
+   await image.decode();
+   return [name,image.naturalWidth,image.naturalHeight];
+  }));
+ });
+ if(images.some(([,width,height])=>width<=0||height<=0))throw Error('The packaged research artwork could not be decoded');
+}
+
+async function savedResearchTopics(page){
+ return page.evaluate(async()=>{
+  const {createResearchStore}=await import('/research-storage.mjs');
+  const store=await createResearchStore();
+  try{return (await store.listProjects()).map(topic=>topic.id).sort();}
+  finally{store.close();}
+ });
+}
+
+async function approveCollection(page,fixture){
+ const before=await savedResearchTopics(page);
+ const example=page.locator('.research-cohort-example');
+ await example.getByText(fixture,{exact:false}).first().waitFor();
+ await example.locator('a[href^="https://"]').first().waitFor();
+ await page.locator('#research-cohort-confirm').click();
+ const report=page.locator('.research-collection-preview');
+ await report.waitFor({timeout:60000});
+ if(JSON.stringify(before)!==JSON.stringify(await savedResearchTopics(page)))throw Error('A Research topic was saved before accepting the collection report');
+ await page.locator('#research-cohort-start').click();
+ await page.locator('#research-question').waitFor({timeout:60000});
+}
+
 async function verifyNativeCohort(app,page){
  const request=async payload=>page.evaluate(async({endpoint,payload})=>{
   const response=await fetch(endpoint,{
@@ -36,8 +70,6 @@ async function verifyNativeCohort(app,page){
  },{endpoint:cohortEndpoint,payload});
  const invalid=await request({action:'page',criteria:{id:'unrecognized'},cursor:null});
  if(invalid.status!==422||!invalid.body.error)throw Error('Native cohort endpoint did not validate criteria: '+JSON.stringify(invalid));
- const reviewed=await request({action:'prepare',prompt:'U.S. presidents'});
- if(reviewed.status!==200||reviewed.body.criteria?.title!==exampleTitle||!reviewed.body.sources?.length)throw Error('Native cohort endpoint did not prepare a recognized group: '+JSON.stringify(reviewed));
  await app.evaluate((_,fixtureName)=>{
   const original=globalThis.fetch;
   const value=value=>({value}),entity=id=>value('http://www.wikidata.org/entity/'+id);
@@ -60,17 +92,15 @@ async function verifyNativeCohort(app,page){
   }));
   const before=await savedCharts();
   await openLabLauncher(page);
+  await verifyNativeOrbitAssets(page);
   await page.locator('#research-cohort-prompt').fill('Find all U.S. presidents');
   await page.locator('#research-cohort-form button[type=submit]').click();
-  await page.locator('#research-cohort-confirm').waitFor();
-  if(await app.evaluate(()=>globalThis.nativeResearchFixture.calls)!==0)throw Error('Cohort sources were accessed before review confirmation');
-  await page.locator('#research-cohort-confirm').click();
-  await page.locator('#research-question').waitFor({timeout:60000});
+  await approveCollection(page,fixtureName);
   await page.getByText(fixtureName,{exact:true}).first().waitFor();
   await checkStoredCohort(page);
   if(JSON.stringify(before)!==JSON.stringify(await savedCharts()))throw Error('Native cohort creation changed Saved Charts or History');
   const calls=await app.evaluate(()=>globalThis.nativeResearchFixture.calls);
-  if(calls!==1)throw Error('Native cohort endpoint should request one fixture page');
+  if(calls<2)throw Error('The native endpoint must verify a source example before collecting the roster');
   await page.locator('[data-workspace=charts]').click();
   console.log(JSON.stringify({nativeOnlineCohort:true,reviewed:true,fixtureRecords:2,charted:1,upstreamCalls:calls}));
  }finally{
@@ -155,7 +185,7 @@ async function verifyNativeCombinedCohort(app,page){
   ].map(([id,name,date])=>Object.fromEntries(Object.entries({
    person:'http://www.wikidata.org/entity/'+id,name,date,
    place:'http://www.wikidata.org/entity/Q18094',placeName:'Honolulu',
-   point:'Point(-157.8583 21.3069)',tz:'Pacific/Honolulu',cc:'US'
+   point:'Point(-157.8583 21.3069)',tz:'Pacific/Honolulu',cc:'US',sampleOccupation:'Lawyer'
   }).map(([key,value])=>[key,{value}])));
   globalThis.fetch=async(input,init)=>{
    const target=new URL(input instanceof Request?input.url:input);
@@ -185,10 +215,7 @@ async function verifyNativeCombinedCohort(app,page){
   await page.locator('#research-cohort-data-prompt').fill(combinedDataPrompt);
   await page.locator('#research-cohort-form button[type=submit]').click();
   await page.locator('.research-cohort-data-review').getByText('Occupations',{exact:false}).first().waitFor();
-  const before=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
-  if(before.length)throw Error('The native launcher fetched officeholder or facts sources before confirmation');
-  await page.locator('#research-cohort-confirm').click();
-  await page.locator('#research-question').waitFor({timeout:60000});
+  await approveCollection(page,combinedFixture);
   await page.getByText(combinedFixture,{exact:true}).first().waitFor();
   await page.locator('#research-question').fill(combinedAnalysis);
   await page.locator('#research-query-form button[type=submit]').click();
@@ -201,8 +228,8 @@ async function verifyNativeCombinedCohort(app,page){
   await page.getByText('Topic notes saved.',{exact:true}).waitFor();
   const saved=await getCombinedEvidence(page);
   const calls=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
-  const expected=['officeholders',['claims',['Q1000993','Q1000994']],['labels',['Q1601','Q1602']]];
-  if(JSON.stringify(calls)!==JSON.stringify(expected))throw Error('The native import did not fetch the reviewed roster and facts: '+JSON.stringify(calls));
+  const fullFacts=calls.some(call=>Array.isArray(call)&&call[0]==='claims'&&call[1].includes('Q1000993')&&call[1].includes('Q1000994'));
+  if(calls.filter(call=>call==='officeholders').length<2||!fullFacts)throw Error('The native import did not verify a sample and collect the reviewed roster and facts: '+JSON.stringify(calls));
   await page.getByRole('button',{name:'Archive topic',exact:true}).click();
   await page.getByRole('dialog',{name:'Archive this topic?'}).getByRole('button',{name:'Archive topic',exact:true}).click();
   await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
@@ -226,23 +253,25 @@ async function verifyNativeCombinedCohort(app,page){
 async function verifyWindowsPlanner(app,page,{reopen=false}={}){
  if(process.platform!=='win32')return;
  await openLabLauncher(page);
- await page.getByRole('button',{name:'Planner settings',exact:true}).click();
+ await page.locator('[data-r-action=planner-settings]').click();
  const dialog=page.getByRole('dialog',{name:'JyotishGPT settings'});
  const status=dialog.getByRole('status');
  if(reopen){
   await status.getByText('An API key is saved on this device.',{exact:true}).waitFor();
+  if(await dialog.getByLabel('Research model',{exact:true}).inputValue()!=='gpt-4.1')throw Error('Selected research model did not survive restart');
   await dialog.getByRole('button',{name:'Remove key',exact:true}).click();
   await status.getByText('API key removed.',{exact:true}).waitFor();
   if((await page.evaluate(()=>JyotishDesktopResearchModel.status())).configured)throw Error('The native planner key could not be removed');
   await dialog.getByRole('button',{name:'Close planner settings'}).click();
  }else{
   await status.getByText('No API key saved.',{exact:true}).waitFor();
+  await dialog.getByLabel('Research model',{exact:true}).selectOption('gpt-4.1');
   await dialog.getByLabel('OpenAI API key',{exact:true}).fill(fakeKey);
   await dialog.getByRole('button',{name:'Save key',exact:true}).click();
   await status.getByText('API key saved on this device.',{exact:true}).waitFor();
   if(await dialog.getByLabel('OpenAI API key',{exact:true}).inputValue())throw Error('The native planner left a key in its input');
   const settings=await page.evaluate(()=>JyotishDesktopResearchModel.status());
-  if(!settings.available||!settings.configured||settings.model!=='gpt-5-mini'||Object.keys(settings).length!==3)throw Error('The native planner returned unexpected settings');
+  if(!settings.available||!settings.configured||settings.model!=='gpt-4.1'||Object.keys(settings).length!==3)throw Error('The native planner returned unexpected settings');
   const encrypted=await app.evaluate(async({app},fakeKey)=>{
    const fs=process.getBuiltinModule('node:fs/promises'),path=process.getBuiltinModule('node:path');
    const raw=await fs.readFile(path.join(app.getPath('userData'),'research-model-key.json'),'utf8');
@@ -255,10 +284,16 @@ async function verifyWindowsPlanner(app,page,{reopen=false}={}){
    globalThis.nativeModelFixture={original:globalThis.fetch,calls:0};
    globalThis.fetch=async(input,init)=>{
     const target=input instanceof Request?input.url:String(input);
+    if(new URL(target).hostname==='query.wikidata.org'){
+     const sample=Object.fromEntries(Object.entries({
+      person:'http://www.wikidata.org/entity/Q1000991',name:'Native fixture president',date:'1980-01-01T00:00:00Z'
+     }).map(([key,value])=>[key,{value}]));
+     return Response.json({results:{bindings:[sample]}});
+    }
     if(target!=='https://api.openai.com/v1/responses')throw Error('Unexpected upstream request during model review');
     const body=JSON.parse(init.body);
     if(init.method!=='POST'||new Headers(init.headers).get('Authorization')!==`Bearer ${fakeKey}`||
-      body.model!=='gpt-5-mini'||body.input!==prompt||body.store!==false)throw Error('Unexpected model request');
+      body.model!=='gpt-4.1'||body.input!==prompt||body.store!==false)throw Error('Unexpected model request');
     globalThis.nativeModelFixture.calls++;
     const plan={kind:'named',id:'us-presidents',group:null,occupation:null,relation:null,entity:null,country:null,message:null};
     return Response.json({status:'completed',output:[{
@@ -269,9 +304,13 @@ async function verifyWindowsPlanner(app,page,{reopen=false}={}){
   try{
    await page.locator('#research-cohort-prompt').fill(modelPrompt);
    await page.locator('#research-cohort-form button[type=submit]').click();
-   await page.locator('.research-cohort-review').getByText(exampleTitle,{exact:true}).waitFor();
+   await page.locator('.research-cohort-review > strong').filter({hasText:exampleTitle}).waitFor();
    await page.locator('#research-cohort-confirm').waitFor();
    if(await app.evaluate(()=>globalThis.nativeModelFixture.calls)!==1)throw Error('The native model review did not use one request');
+   const before=await savedResearchTopics(page);
+   await page.locator('[data-r-action=discard-cohort]').click();
+   await page.locator('#research-cohort-prompt').waitFor();
+   if(JSON.stringify(before)!==JSON.stringify(await savedResearchTopics(page)))throw Error('Discarding the model review created a topic');
   }finally{
    await app.evaluate(()=>{
     globalThis.fetch=globalThis.nativeModelFixture.original;

@@ -48,6 +48,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    await verifyNativeCohort(app,page);
    phase='cohort and Wikidata facts';
    await verifyNativeCombinedCohort(app,page);
+   phase='public dataset discovery';
+   const {verifyDiscoveredCohort,verifyLivePublicRegister}=require('./research-discovered-native-smoke.cjs');
+   await verifyDiscoveredCohort(app,page);
+   await verifyLivePublicRegister(app);
    phase='native planner';
    await verifyWindowsPlanner(app,page);
   }else if(process.argv[4]==='reopen'){
