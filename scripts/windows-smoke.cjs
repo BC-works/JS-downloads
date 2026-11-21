@@ -6,7 +6,7 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
  console.log('SMOKE launch');const app=await _electron.launch({executablePath:process.argv[2],timeout:60000});
  try{phase='first window';console.log('SMOKE first window');const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));phase='form';console.log('SMOKE wait for form');await page.waitForSelector('#birth-form',{timeout:60000});console.log('SMOKE form ready');
   if(await page.evaluate(()=>typeof require)!=='undefined')throw Error('Renderer has Node access');
-  if(process.argv[4]!=='baseline'&&await page.locator('#ayan').inputValue()!=='true-chitra')throw Error('New charts must default to True Chitra Lahiri');
+  if(expectedVersion!=='3.3.0'&&await page.locator('#ayan').inputValue()!=='true-chitra')throw Error('New charts must default to True Chitra Lahiri');
   phase='updater status';console.log('SMOKE updater status');if((await page.evaluate(()=>JyotishDesktopUpdates.status())).currentVersion!==expectedVersion)throw Error('Wrong installed version');
   if(process.argv[4]!=='baseline'){
    phase='lookup startup';console.log('SMOKE real packaged lookup startup');
@@ -22,6 +22,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    if(result.status!==200||result.date!=='1988-04-15'||result.time!=='05:00'||!result.cached||!result.noExtraFetch)throw Error('Packaged lookup fixture failed: '+JSON.stringify(result));console.log('SMOKE packaged lookup and persistent cache passed');
   }
   phase='chart data';console.log('SMOKE chart data '+process.argv[4]);if(['seed','baseline'].includes(process.argv[4])){
+   if(await page.locator('#ayan').inputValue()!=='lahiri'){
+    await page.getByRole('button',{name:'Calculation settings',exact:true}).click();
+    await page.locator('#ayan').selectOption('lahiri');
+   }
    await page.evaluate(async()=>{const {setDateValue}=await import('/date-entry.mjs');setDateValue('#birth-date','-001999-01-01',{notify:true});});
    await page.locator('#chart-name').fill('Windows Update Smoke');await page.locator('#birth-time').fill('12:00:00');await page.locator('#birth-form button[type=submit]').click();
    if(!(await page.locator('.status-bar').innerText()).includes('2000 BCE'))throw Error('Installed BCE calculation failed');
