@@ -8,6 +8,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
   if(await page.evaluate(()=>typeof require)!=='undefined')throw Error('Renderer has Node access');
   if(expectedVersion!=='3.3.0'&&await page.locator('#ayan').inputValue()!=='true-chitra')throw Error('New charts must default to True Chitra Lahiri');
   phase='updater status';console.log('SMOKE updater status');if((await page.evaluate(()=>JyotishDesktopUpdates.status())).currentVersion!==expectedVersion)throw Error('Wrong installed version');
+  if(['baseline','verify'].includes(process.argv[4])){
+   phase='legacy encrypted model preferences';
+   await require('./research-cohort-native-smoke.cjs').verifyWindowsPlannerMigration(app,page,process.argv[4]==='baseline');
+  }
   if(process.argv[4]!=='baseline'){
    phase='lookup startup';console.log('SMOKE real packaged lookup startup');
    const startup=await page.evaluate(async()=>{const r=await fetch('/api/people/search?q=x');return {status:r.status,data:await r.json()};});

@@ -250,76 +250,142 @@ async function verifyNativeCombinedCohort(app,page){
  }
 }
 
+async function verifyWindowsPlannerMigration(app,page,baseline){
+ if(!baseline)await app.evaluate(()=>{
+  globalThis.originalMigrationFetch=globalThis.fetch;
+  globalThis.fetch=async(url,init)=>{
+   if(String(url)!=='https://api.openai.com/v1/models'||new Headers(init?.headers).get('Authorization')!=='Bearer sk-legacy-migration-test-credential'){
+    throw Error('Legacy credential could not be used to list account models');
+   }
+   return Response.json({object:'list',data:[{id:'gpt-4.1',object:'model',created:1744415210,owned_by:'system'}]});
+  };
+ });
+ let result;
+ try{
+  result=await page.evaluate(async baseline=>{
+  const bridge=globalThis.JyotishDesktopResearchModel;
+  if(baseline){
+   return bridge.save({apiKey:'sk-legacy-migration-test-credential',model:'gpt-4.1'});
+  }
+  const before=await bridge.status();
+  const account=await bridge.models(true);
+  if(!account.verified||!account.options.some(option=>option.id==='gpt-4.1'))throw Error('Migrated credential could not be unlocked');
+  await bridge.remove();
+  if((await bridge.status()).configured)throw Error('Legacy key could not be removed');
+  return before;
+  },baseline);
+ }finally{
+  if(!baseline)await app.evaluate(()=>{globalThis.fetch=globalThis.originalMigrationFetch;delete globalThis.originalMigrationFetch;});
+ }
+ if(!result.available||!result.configured||result.model!=='gpt-4.1'||Object.keys(result).length!==3){
+  throw Error('Encrypted legacy planner settings did not survive the installer upgrade');
+ }
+ console.log(JSON.stringify({legacyPlannerKey:true,phase:baseline?'seed':'verify'}));
+}
+
+async function installWindowsPlannerFixture(app,model){
+ await app.evaluate((_,{fakeKey,prompt,model})=>{
+  const fixture={original:globalThis.fetch,models:0,plans:0};
+  globalThis.nativeModelFixture=fixture;
+  globalThis.fetch=async(input,init)=>{
+   const target=input instanceof Request?input.url:String(input);
+   const authorization=new Headers(init?.headers).get('Authorization');
+   if(target==='https://api.openai.com/v1/models'){
+    if(init?.method!=='GET'||authorization!=='Bearer '+fakeKey||init.redirect!=='error')throw Error('Unexpected account model listing request');
+    fixture.models++;
+    return Response.json({object:'list',data:[model,'gpt-5-mini','text-embedding-3-small'].map(id=>({
+     id,object:'model',created:1744415210,owned_by:'system'
+    }))});
+   }
+   if(new URL(target).hostname==='query.wikidata.org'){
+    const sample=Object.fromEntries(Object.entries({
+     person:'http://www.wikidata.org/entity/Q1000991',name:'Native fixture president',date:'1980-01-01T00:00:00Z'
+    }).map(([key,value])=>[key,{value}]));
+    return Response.json({results:{bindings:[sample]}});
+   }
+   if(target!=='https://api.openai.com/v1/responses')throw Error('Unexpected upstream request during model review');
+   const body=JSON.parse(init.body);
+   if(init.method!=='POST'||authorization!=='Bearer '+fakeKey||body.model!==model||body.input!==prompt||body.store!==false){
+    throw Error('Research did not use the exact selected account model');
+   }
+   fixture.plans++;
+   const plan={kind:'named',id:'us-presidents',group:null,occupation:null,relation:null,entity:null,country:null,message:null};
+   return Response.json({status:'completed',output:[{
+    type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(plan)}]
+   }]});
+  };
+ },{fakeKey,prompt:modelPrompt,model});
+}
+
 async function verifyWindowsPlanner(app,page,{reopen=false}={}){
  if(process.platform!=='win32')return;
- await openLabLauncher(page);
- await page.locator('[data-r-action=planner-settings]').click();
- const dialog=page.getByRole('dialog',{name:'JyotishGPT settings'});
- const status=dialog.getByRole('status');
- if(reopen){
-  await status.getByText('An API key is saved on this device.',{exact:true}).waitFor();
-  if(await dialog.getByLabel('Research model',{exact:true}).inputValue()!=='gpt-4.1')throw Error('Selected research model did not survive restart');
-  await dialog.getByRole('button',{name:'Remove key',exact:true}).click();
-  await status.getByText('API key removed.',{exact:true}).waitFor();
-  if((await page.evaluate(()=>JyotishDesktopResearchModel.status())).configured)throw Error('The native planner key could not be removed');
-  await dialog.getByRole('button',{name:'Close planner settings'}).click();
- }else{
-  await status.getByText('No API key saved.',{exact:true}).waitFor();
-  await dialog.getByLabel('Research model',{exact:true}).selectOption('gpt-4.1');
-  await dialog.getByLabel('OpenAI API key',{exact:true}).fill(fakeKey);
-  await dialog.getByRole('button',{name:'Save key',exact:true}).click();
-  await status.getByText('API key saved on this device.',{exact:true}).waitFor();
-  if(await dialog.getByLabel('OpenAI API key',{exact:true}).inputValue())throw Error('The native planner left a key in its input');
-  const settings=await page.evaluate(()=>JyotishDesktopResearchModel.status());
-  if(!settings.available||!settings.configured||settings.model!=='gpt-4.1'||Object.keys(settings).length!==3)throw Error('The native planner returned unexpected settings');
+ const model='gpt-4.1-nano';
+ await installWindowsPlannerFixture(app,model);
+ try{
+  await openLabLauncher(page);
+  await page.locator('[data-r-action=planner-settings]').click();
+  const dialog=page.getByRole('dialog',{name:'JyotishGPT settings'});
+  const key=dialog.getByLabel('OpenAI API key',{exact:true});
+  const choice=dialog.getByLabel('Research model',{exact:true});
+  const accountModel=choice.locator('option[value="'+model+'"]');
+  if(!reopen){
+   if((await page.evaluate(()=>JyotishDesktopResearchModel.status())).configured)throw Error('Unexpected saved key before Windows model setup');
+   await key.fill(fakeKey);
+   await dialog.getByRole('button',{name:'Save key',exact:true}).click();
+   await accountModel.waitFor({state:'attached'});
+   await choice.locator('option[value="text-embedding-3-small"]').waitFor({state:'attached'});
+   if((await page.evaluate(()=>JyotishDesktopResearchModel.status())).model!==null)throw Error('A first key must wait for an explicit research model');
+   await choice.selectOption(model);
+   await dialog.getByRole('button',{name:'Save changes',exact:true}).click();
+   await page.waitForFunction(async model=>(await JyotishDesktopResearchModel.status()).model===model,model);
+  }else{
+   await accountModel.waitFor({state:'attached'});
+   if(await choice.inputValue()!==model)throw Error('Selected account model did not survive restart');
+  }
+  if(await key.inputValue())throw Error('The saved key remained in the renderer input');
+  const state=await page.evaluate(async()=>({
+   status:await JyotishDesktopResearchModel.status(),
+   cached:await JyotishDesktopResearchModel.models(false),
+   storage:Object.values(localStorage).join(' ')
+  }));
+  if(!state.status.available||!state.status.configured||state.status.model!==model||Object.keys(state.status).length!==3||JSON.stringify(state).includes(fakeKey)){
+   throw Error('Unexpected exposed credential or incorrect account model');
+  }
+  // A cached list can paint before the automatic provider request completes on reopen.
+  await dialog.locator('#research-catalog-status').filter({hasText:/Your OpenAI project lists 3 models/}).waitFor();
+  const counts=await app.evaluate(()=>globalThis.nativeModelFixture.models);
+  if(counts<1)throw Error('The installed app did not automatically request available models');
   const encrypted=await app.evaluate(async({app},fakeKey)=>{
    const fs=process.getBuiltinModule('node:fs/promises'),path=process.getBuiltinModule('node:path');
    const raw=await fs.readFile(path.join(app.getPath('userData'),'research-model-key.json'),'utf8');
    const {encryptedKey}=JSON.parse(raw);
    return !!encryptedKey&&!raw.includes(fakeKey)&&!Buffer.from(encryptedKey,'base64').includes(fakeKey);
   },fakeKey);
-  if(!encrypted)throw Error('The native planner did not encrypt the key on disk');
-  await dialog.getByRole('button',{name:'Close planner settings'}).click();
-  await app.evaluate((_,{fakeKey,prompt})=>{
-   globalThis.nativeModelFixture={original:globalThis.fetch,calls:0};
-   globalThis.fetch=async(input,init)=>{
-    const target=input instanceof Request?input.url:String(input);
-    if(new URL(target).hostname==='query.wikidata.org'){
-     const sample=Object.fromEntries(Object.entries({
-      person:'http://www.wikidata.org/entity/Q1000991',name:'Native fixture president',date:'1980-01-01T00:00:00Z'
-     }).map(([key,value])=>[key,{value}]));
-     return Response.json({results:{bindings:[sample]}});
-    }
-    if(target!=='https://api.openai.com/v1/responses')throw Error('Unexpected upstream request during model review');
-    const body=JSON.parse(init.body);
-    if(init.method!=='POST'||new Headers(init.headers).get('Authorization')!==`Bearer ${fakeKey}`||
-      body.model!=='gpt-4.1'||body.input!==prompt||body.store!==false)throw Error('Unexpected model request');
-    globalThis.nativeModelFixture.calls++;
-    const plan={kind:'named',id:'us-presidents',group:null,occupation:null,relation:null,entity:null,country:null,message:null};
-    return Response.json({status:'completed',output:[{
-     type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(plan)}]
-    }]});
-   };
-  },{fakeKey,prompt:modelPrompt});
-  try{
+  if(!encrypted)throw Error('The native planner did not encrypt the saved key');
+  if(reopen){
+   await dialog.getByRole('button',{name:'Remove key',exact:true}).click();
+   await page.waitForFunction(async()=>!(await JyotishDesktopResearchModel.status()).configured);
+   await dialog.getByRole('button',{name:'Close planner settings'}).click();
+  }else{
+   await dialog.getByRole('button',{name:'Close planner settings'}).click();
    await page.locator('#research-cohort-prompt').fill(modelPrompt);
    await page.locator('#research-cohort-form button[type=submit]').click();
    await page.locator('.research-cohort-review > strong').filter({hasText:exampleTitle}).waitFor();
    await page.locator('#research-cohort-confirm').waitFor();
-   if(await app.evaluate(()=>globalThis.nativeModelFixture.calls)!==1)throw Error('The native model review did not use one request');
+   if(await app.evaluate(()=>globalThis.nativeModelFixture.plans)!==1)throw Error('The model review did not use one request');
    const before=await savedResearchTopics(page);
    await page.locator('[data-r-action=discard-cohort]').click();
    await page.locator('#research-cohort-prompt').waitFor();
    if(JSON.stringify(before)!==JSON.stringify(await savedResearchTopics(page)))throw Error('Discarding the model review created a topic');
-  }finally{
-   await app.evaluate(()=>{
-    globalThis.fetch=globalThis.nativeModelFixture.original;
-    delete globalThis.nativeModelFixture;
-   });
   }
+  await page.locator('[data-workspace=charts]').click();
+  console.log(JSON.stringify({nativePlanner:true,encryptedKey:true,accountModel:model,automaticModelListCalls:counts,modelReview:!reopen,retainedKeyRemoved:reopen}));
+ }finally{
+  await app.evaluate(()=>{
+   globalThis.fetch=globalThis.nativeModelFixture.original;
+   delete globalThis.nativeModelFixture;
+  });
  }
- await page.locator('[data-workspace=charts]').click();
- console.log(JSON.stringify({nativePlanner:true,encryptedKey:true,modelReview:!reopen,retainedKeyRemoved:reopen}));
 }
 
-module.exports={verifyNativeCohort,checkStoredCohort,verifyNativeCombinedCohort,checkStoredCombinedCohort,verifyWindowsPlanner};
+module.exports={verifyNativeCohort,checkStoredCohort,verifyNativeCombinedCohort,checkStoredCombinedCohort,verifyWindowsPlanner,verifyWindowsPlannerMigration};
