@@ -3,16 +3,51 @@ async function openLabLauncher(page,{allowResume=true}={}){
  await page.locator('[data-workspace=research-lab]').click();
  const prompt=page.locator('#research-cohort-prompt');
  if(allowResume){
-  const activeTopic=page.locator('#research-question');
+  const activeTopic=page.locator('[data-r-action=close-lab-topic]').or(page.locator('#research-question'));
   await prompt.or(activeTopic).first().waitFor();
-  if(await activeTopic.isVisible()){
-   const collapsed=page.locator('#research-lab-topics-toggle[aria-expanded=false]');
-   if(await collapsed.isVisible())await collapsed.click();
-   await page.locator('#research-lab-new-topic').click();
+  if(!await prompt.isVisible()){
+   const close=page.locator('[data-r-action=close-lab-topic]');
+   if(await close.isVisible())await close.click();
+   else{
+    const collapsed=page.locator('#research-lab-topics-toggle[aria-expanded=false]');
+    if(await collapsed.isVisible())await collapsed.click();
+    await page.locator('#research-lab-new-topic').click();
+   }
   }
  }
  await prompt.waitFor();
  await page.locator('#research-lab-topics').waitFor();
+}
+
+async function verifyLabTopicPanels(page,topicId,{notes}){
+ const tabs=page.getByRole('tablist',{name:/research lab|topic views/i}).filter({has:page.getByRole('tab',{name:'Main',exact:true})});
+ const main=page.getByRole('tab',{name:'Main',exact:true});
+ const notesTab=page.getByRole('tab',{name:'Notes',exact:true});
+ const addData=page.locator('.research-members #research-add-data');
+ const right=page.locator('.research-lab-toolbar-right');
+ const close=page.locator('[data-r-action=close-lab-topic]');
+ await main.waitFor();
+ if(await tabs.count()!==1||await main.getAttribute('aria-selected')!=='true')throw Error('The Research Lab topic did not open on Main');
+ await addData.waitFor();
+ await right.locator('[data-r-action=edit-topic-notes]').waitFor();
+ for(const action of ['topic-settings','import-backup','export-project'])await right.locator(`[data-r-action=${action}]`).waitFor();
+ const [leftBox,rightBox]=await Promise.all([addData.boundingBox(),right.boundingBox()]);
+ if(!leftBox||!rightBox||leftBox.x+leftBox.width>=rightBox.x)throw Error('Research Lab data and topic controls are not on their expected sides');
+ await notesTab.click();
+ if(await notesTab.getAttribute('aria-selected')!=='true')throw Error('Notes tab did not become active');
+ const textarea=page.locator('#research-topic-notes');
+ await textarea.waitFor();
+ if(await textarea.inputValue()!==notes)throw Error('Research Lab did not preserve topic notes');
+ await page.locator('#research-question').waitFor({state:'hidden'});
+ await main.click();
+ await page.locator('#research-question').waitFor();
+ await textarea.waitFor({state:'hidden'});
+ await close.click();
+ await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
+ if(!page.url().endsWith('#research-lab'))throw Error('Closing the topic left Research Lab');
+ await page.locator('#research-question').waitFor({state:'hidden'});
+ await page.locator(`[data-r-lab-topic="${topicId}"]`).click();
+ await page.locator('#research-question').waitFor();
 }
 
 async function runClassicResearchNative(page,{reopen=false,legacy=false,expectExisting=false}={}){
@@ -65,7 +100,7 @@ async function runClassicResearchNative(page,{reopen=false,legacy=false,expectEx
  console.log(JSON.stringify({nativeResearch:true,reopen,legacy,expectExisting,customOrigin:page.url(),numericWorker:true,inspectorD9:true,pinned:true,primaryWorkspace:!legacy,topicTabs:!legacy,isolatedLibraries:true,releasedWorker:true}));
 }
 
-async function runLabResearchNative(page,{reopen=false,expectExisting=false,expectLegacyPin=false,expectLauncher=false}={}){
+async function runLabResearchNative(page,{reopen=false,expectExisting=false,expectLegacyPin=false,expectLauncher=false,expectTopicPanels=false}={}){
  const title='Native Research Smoke',datasetTitle='Native CSV evidence';
  const question='Distribution of Moon signs where Minutes played >= 10';
  const original=await page.evaluate(()=>({
@@ -109,13 +144,13 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   await page.getByRole('button',{name:'Native Moon sign result'}).click();
   await page.getByText('Frozen native Research evidence',{exact:true}).waitFor();
  }
+ await page.locator('#continue-research').click();
+ await page.locator('#research-question').waitFor();
  const labTopic=page.locator(`[data-r-lab-topic="${topic.id}"]`);
- if(expectLauncher){
-  await openLabLauncher(page,{allowResume:reopen||expectExisting});
-  await labTopic.click();
-  await page.locator('#research-lab-topics-toggle[aria-expanded=false]').waitFor();
- }else{
-  await page.locator('#continue-research').click();
+ const hasLauncher=await page.locator('#research-lab-topics').count()>0;
+ if(expectLauncher&&!hasLauncher)throw Error('Expected native Research Lab launcher and topic list');
+ if(hasLauncher)await page.locator('#research-lab-topics-toggle[aria-expanded=false]').waitFor();
+ else{
   await page.locator(`#research-topic-tabs-slot [data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
  }
  await page.locator('[data-workspace=research-lab][aria-pressed=true]').waitFor();
@@ -167,7 +202,8 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  await page.locator('.research-inspector svg[aria-label="D9 South Indian chart"]').waitFor();
  await page.locator('.research-inspector-positions').waitFor();
  await page.locator('[data-r-action=close-inspector]').click();
- if(expectLauncher){
+ if(expectTopicPanels)await verifyLabTopicPanels(page,topic.id,{notes:'Retained native Research notes'});
+ else if(hasLauncher){
   await page.locator('#research-lab-topics-toggle').click();
   await labTopic.waitFor();
   await labTopic.click();
@@ -191,7 +227,7 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  if(after.worker.worker||after.worker.pending||after.retainedEvidence!==0||after.retainedMembers!==0)throw Error('Research retained the worker or chart evidence on exit');
  console.log(JSON.stringify({nativeResearchLab:true,reopen,numericWorker:true,customOrigin:page.url(),
   csvFilter:true,datasetVersionRetained:true,inspectorD9:true,savedQuestionRetained:!!topic.priorResultId,
-  legacyPinRetained:expectLegacyPin,desktopLauncher:expectLauncher,releasedWorker:true}));
+  legacyPinRetained:expectLegacyPin,desktopLauncher:hasLauncher,topicPanels:expectTopicPanels,releasedWorker:true}));
 }
 
 async function runResearchNative(page,options={}){
@@ -199,4 +235,4 @@ async function runResearchNative(page,options={}){
   ?runLabResearchNative(page,options)
   :runClassicResearchNative(page,options);
 }
-module.exports={runResearchNative,openLabLauncher};
+module.exports={runResearchNative,openLabLauncher,verifyLabTopicPanels};

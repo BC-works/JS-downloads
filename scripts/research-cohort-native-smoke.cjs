@@ -5,6 +5,10 @@ const exampleTitle='U.S. presidents';
 const fixtureName='Native fixture president';
 const modelPrompt='Please find everyone who occupied the top elected office in the United States';
 const fakeKey='sk-native-smoke-fake-key';
+const nbaTopic='NBA players';
+const nbaFixture='Native fixture basketball player';
+const nbaDataPrompt='I want all their stats too';
+const nbaAnalysis='Distribution of Moon signs where Points >= 7000';
 
 async function checkStoredCohort(page){
  const topic=await page.evaluate(async title=>{
@@ -76,6 +80,106 @@ async function verifyNativeCohort(app,page){
  }
 }
 
+async function checkStoredCombinedCohort(page){
+ return page.evaluate(async({nbaTopic,nbaFixture,nbaAnalysis})=>{
+  const {createResearchStore}=await import('/research-storage.mjs');
+  const store=await createResearchStore();
+  try{
+   const matches=(await store.listProjects()).filter(topic=>topic.name===nbaTopic);
+   if(matches.length!==1)throw Error('Expected one retained NBA roster and stats topic');
+   const {id}=matches[0],topic=await store.getProject(id);
+   const member=topic.members.find(person=>person.name===nbaFixture);
+   if(!member||member.sourcePersonId!=='nba-game-nativfi01'||member.input.timeKnown!==false)throw Error('The joined player must retain its public ID and unknown-time chart qualification');
+   const data=await store.getResearchDatasets(id);
+   if(data.length!==1||!data[0].fields.some(field=>field.key==='points'))throw Error('The reviewed statistics dataset did not stay attached');
+   const joined=data[0].records.find(record=>record.memberId===member.id);
+   if(joined?.values.points!==7350)throw Error('The saved points do not belong to the fixture player');
+   const notes=await store.listPromptResults(id),summary=notes.find(item=>item.query===nbaAnalysis);
+   if(!summary)throw Error('No retained question for the imported dataset');
+   const report=await store.getPromptResult(id,summary.id);
+   const scope=report.result.context.data;
+   if(scope.matched!==1||report.result.eligible!==1||report.result.context.birthTime.unknownIncluded!==1||
+      scope.sources[0]?.id!==data[0].id||scope.sources[0]?.version!==data[0].version){
+    throw Error('The retained query did not use the reviewed dataset or chart eligibility rules');
+   }
+   return {topicId:id,resultId:summary.id,dataVersion:data[0].version};
+  }finally{store.close();}
+ },{nbaTopic,nbaFixture,nbaAnalysis});
+}
+
+async function verifyNativeCombinedCohort(app,page){
+ await app.evaluate((_,{fixtureName})=>{
+  const original=globalThis.fetch,response=body=>new Response(body);
+  globalThis.nativeCombinedFixture={original,calls:[]};
+  const totals='season,lg,player,player_id,age,team,pos,g,gs,mp,fg,fga,fg_percent,x3p,x3pa,x3p_percent,x2p,x2pa,x2p_percent,e_fg_percent,ft,fta,ft_percent,orb,drb,trb,ast,stl,blk,tov,pf,pts,trp_dbl\n'+
+   `2005,NBA,${fixtureName},nativfi01,25,ABC,PG,350,300,10000,2600,5000,.52,650,1800,.361,1950,3200,.609,.585,1500,1800,.833,100,300,400,1400,300,50,500,700,7350,4\n`+
+   '2005,NBA,Native fixture basketball reserve,nativfi02,24,ABC,SG,100,30,3500,400,1000,.40,150,500,.30,250,500,.50,.475,200,300,.667,50,100,150,400,70,20,150,150,1150,0\n';
+  const born=[
+   ['Q1000993','n/nativfi01','100001','1980-01-01T00:00:00Z'],
+   ['Q1000994','n/nativfi02','100002','1981-01-01T00:00:00Z'],
+  ].map(([id,profile,nba,date])=>Object.fromEntries(Object.entries({
+   person:'http://www.wikidata.org/entity/'+id,profile,nba,date,
+   place:'http://www.wikidata.org/entity/Q18094',placeName:'Honolulu',
+   point:'Point(-157.8583 21.3069)',tz:'Pacific/Honolulu',cc:'US'
+  }).map(([key,value])=>[key,{value}])));
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(input instanceof Request?input.url:input);
+   const record=name=>globalThis.nativeCombinedFixture.calls.push(name);
+   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/Player%20Totals.csv')){
+    record('totals');return response(totals);
+   }
+   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/Player%20Career%20Info.csv')){
+    record('career profiles');return response('player_id,birth_date,pos,ht_in_in,wt,hof\nnativfi01,1980-01-01,PG,76,195,FALSE\nnativfi02,1981-01-01,SG,78,205,FALSE\n');
+   }
+   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/library/data.py')){
+    record('directory');return response(`players = [\n    [100001, "Player", "Fixture", "${fixtureName}", True],\n    [100002, "Reserve", "Fixture", "Native fixture basketball reserve", False],\n]\n`);
+   }
+   if(url.hostname==='www.kaggle.com'&&url.pathname.endsWith('/Players.csv')){
+    record('player dates');return response('personId,birthdate\n100001,1980-01-01\n100002,1981-01-01\n');
+   }
+   if(url.origin==='https://query.wikidata.org'&&url.pathname==='/sparql'){
+    if(!url.searchParams.get('query')?.includes('n/nativfi01'))throw Error('Unexpected Wikidata cohort query during combined fixture');
+    record('birth claims');return Response.json({results:{bindings:born}});
+   }
+   return original(input,init);
+  };
+ },{fixtureName:nbaFixture});
+ try{
+  await openLabLauncher(page);
+  await page.locator('#research-cohort-prompt').fill('All NBA players');
+  await page.locator('#research-cohort-data-toggle').click();
+  await page.locator('#research-cohort-data-prompt').fill(nbaDataPrompt);
+  await page.locator('#research-cohort-form button[type=submit]').click();
+  await page.locator('.research-cohort-data-review').waitFor();
+  await page.locator('#research-cohort-confirm').waitFor();
+  const before=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
+  if(before.length)throw Error('The native launcher fetched roster or stat sources before confirmation');
+  await page.locator('#research-cohort-confirm').click();
+  await page.locator('#research-question').waitFor({timeout:60000});
+  await page.getByText(nbaFixture,{exact:true}).first().waitFor();
+  await page.locator('#research-question').fill(nbaAnalysis);
+  await page.locator('#research-query-form button[type=submit]').click();
+  await page.locator('.research-data-review').waitFor();
+  await page.locator('[data-r-action=run-review]').click();
+  await page.locator('.research-results-data').waitFor({timeout:60000});
+  await checkStoredCombinedCohort(page);
+  const calls=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
+  if(!calls.includes('birth claims')||!calls.includes('totals'))throw Error('The native combined import did not use its roster and stats sources');
+  const close=page.locator('[data-r-action=close-lab-topic]');
+  await close.click();
+  await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
+  await page.locator('#research-lab-topics').getByRole('button',{name:nbaTopic,exact:true}).click();
+  await page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:nbaAnalysis}).waitFor();
+  await page.locator('[data-workspace=charts]').click();
+  console.log(JSON.stringify({nativeCombinedCohort:true,combinedReview:true,statsFiltered:true,retainedOnClose:true,fixtureSourceCalls:calls}));
+ }finally{
+  await app.evaluate(()=>{
+   globalThis.fetch=globalThis.nativeCombinedFixture.original;
+   delete globalThis.nativeCombinedFixture;
+  });
+ }
+}
+
 async function verifyWindowsPlanner(app,page,{reopen=false}={}){
  if(process.platform!=='win32')return;
  await openLabLauncher(page);
@@ -136,4 +240,4 @@ async function verifyWindowsPlanner(app,page,{reopen=false}={}){
  console.log(JSON.stringify({nativePlanner:true,encryptedKey:true,modelReview:!reopen,retainedKeyRemoved:reopen}));
 }
 
-module.exports={verifyNativeCohort,checkStoredCohort,verifyWindowsPlanner};
+module.exports={verifyNativeCohort,checkStoredCohort,verifyNativeCombinedCohort,checkStoredCombinedCohort,verifyWindowsPlanner};

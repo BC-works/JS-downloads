@@ -39,19 +39,22 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
   console.log('SMOKE native Research '+process.argv[4]);
   const baseline=process.argv[4]==='baseline';
   await require('./research-native-smoke.cjs').runResearchNative(page,{
-   reopen:process.argv[4]==='reopen',expectExisting:!baseline,expectLauncher:!baseline
+   reopen:process.argv[4]==='reopen',expectExisting:!baseline,expectLauncher:true,expectTopicPanels:!baseline
   });
   if(process.argv[4]==='verify'){
    phase='online cohort';
    console.log('SMOKE native online cohort');
-   const {verifyNativeCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');
+   const {verifyNativeCohort,verifyNativeCombinedCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');
    await verifyNativeCohort(app,page);
+   phase='combined cohort and stats';
+   await verifyNativeCombinedCohort(app,page);
    phase='native planner';
    await verifyWindowsPlanner(app,page);
   }else if(process.argv[4]==='reopen'){
    phase='retained native cohort';
-   const {checkStoredCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');
+   const {checkStoredCohort,checkStoredCombinedCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');
    await checkStoredCohort(page);
+   await checkStoredCombinedCohort(page);
    phase='retained native planner';
    await verifyWindowsPlanner(app,page,{reopen:true});
   }
