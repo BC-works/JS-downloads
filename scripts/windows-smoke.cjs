@@ -46,7 +46,7 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    console.log('SMOKE native online cohort');
    const {verifyNativeCohort,verifyNativeCombinedCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');
    await verifyNativeCohort(app,page);
-   phase='combined cohort and stats';
+   phase='cohort and Wikidata facts';
    await verifyNativeCombinedCohort(app,page);
    phase='native planner';
    await verifyWindowsPlanner(app,page);

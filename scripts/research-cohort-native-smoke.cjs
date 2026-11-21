@@ -5,10 +5,11 @@ const exampleTitle='U.S. presidents';
 const fixtureName='Native fixture president';
 const modelPrompt='Please find everyone who occupied the top elected office in the United States';
 const fakeKey='sk-native-smoke-fake-key';
-const nbaTopic='NBA players';
-const nbaFixture='Native fixture basketball player';
-const nbaDataPrompt='I want all their stats too';
-const nbaAnalysis='Distribution of Moon signs where Points >= 7000';
+const combinedTopic='UK prime ministers';
+const combinedFixture='Native fixture officeholder';
+const combinedDataPrompt='Occupations';
+const combinedAnalysis='Distribution of Moon signs where Occupations contains "Lawyer"';
+const combinedNote='Retain these cohort notes through archive and restart';
 
 async function checkStoredCohort(page){
  const topic=await page.evaluate(async title=>{
@@ -80,21 +81,22 @@ async function verifyNativeCohort(app,page){
  }
 }
 
-async function checkStoredCombinedCohort(page){
- return page.evaluate(async({nbaTopic,nbaFixture,nbaAnalysis})=>{
+async function getCombinedEvidence(page,{archived=false}={}){
+ return page.evaluate(async({combinedTopic,combinedFixture,combinedAnalysis,combinedNote,archived})=>{
   const {createResearchStore}=await import('/research-storage.mjs');
   const store=await createResearchStore();
   try{
-   const matches=(await store.listProjects()).filter(topic=>topic.name===nbaTopic);
-   if(matches.length!==1)throw Error('Expected one retained NBA roster and stats topic');
+   const matches=(await store.listProjects({archived})).filter(topic=>topic.name===combinedTopic);
+   if(matches.length!==1)throw Error('Expected one retained officeholder topic');
    const {id}=matches[0],topic=await store.getProject(id);
-   const member=topic.members.find(person=>person.name===nbaFixture);
-   if(!member||member.sourcePersonId!=='nba-game-nativfi01'||member.input.timeKnown!==false)throw Error('The joined player must retain its public ID and unknown-time chart qualification');
+   const member=topic.members.find(person=>person.name===combinedFixture);
+   if(!member||member.sourcePersonId!=='Q1000993'||member.input.timeKnown!==false)throw Error('The joined officeholder must retain their public ID and unknown-time chart qualification');
+   if(topic.notes!==combinedNote||Boolean(topic.archivedAt)!==archived)throw Error('The combined topic did not retain its notes or archive state');
    const data=await store.getResearchDatasets(id);
-   if(data.length!==1||!data[0].fields.some(field=>field.key==='points'))throw Error('The reviewed statistics dataset did not stay attached');
+   if(data.length!==1||!data[0].fields.some(field=>field.key==='occupation'))throw Error('The reviewed Wikidata dataset did not stay attached');
    const joined=data[0].records.find(record=>record.memberId===member.id);
-   if(joined?.values.points!==7350)throw Error('The saved points do not belong to the fixture player');
-   const notes=await store.listPromptResults(id),summary=notes.find(item=>item.query===nbaAnalysis);
+   if(joined?.values.occupation!=='Lawyer')throw Error('The saved occupation does not belong to the fixture officeholder');
+   const notes=await store.listPromptResults(id),summary=notes.find(item=>item.query===combinedAnalysis);
    if(!summary)throw Error('No retained question for the imported dataset');
    const report=await store.getPromptResult(id,summary.id);
    const scope=report.result.context.data;
@@ -104,75 +106,116 @@ async function checkStoredCombinedCohort(page){
    }
    return {topicId:id,resultId:summary.id,dataVersion:data[0].version};
   }finally{store.close();}
- },{nbaTopic,nbaFixture,nbaAnalysis});
+ },{combinedTopic,combinedFixture,combinedAnalysis,combinedNote,archived});
+}
+
+async function checkStoredCombinedCohort(page){
+ const stored=await getCombinedEvidence(page,{archived:true});
+ await openLabLauncher(page);
+ const archive=page.locator('details.research-topic-archive:visible');
+ const row=archive.locator(`[data-r-archived-topic="${stored.topicId}"]`);
+ if(await archive.getAttribute('open')===null)await archive.locator('summary').click();
+ await row.getByRole('button',{name:'Restore '+combinedTopic,exact:true}).click();
+ await row.waitFor({state:'detached'});
+ await page.locator('#research-lab-topics').getByRole('button',{name:combinedTopic,exact:true}).click();
+ await page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:combinedAnalysis}).click();
+ await page.locator('.research-results-data').getByText('Wikidata biographical facts',{exact:false}).first().waitFor();
+ const restored=await getCombinedEvidence(page);
+ if(JSON.stringify(stored)!==JSON.stringify(restored))throw Error('Restoring the archived cohort changed its result or dataset reference');
+ await page.locator('[data-workspace=charts]').click();
 }
 
 async function verifyNativeCombinedCohort(app,page){
- await app.evaluate((_,{fixtureName})=>{
-  const original=globalThis.fetch,response=body=>new Response(body);
-  globalThis.nativeCombinedFixture={original,calls:[]};
-  const totals='season,lg,player,player_id,age,team,pos,g,gs,mp,fg,fga,fg_percent,x3p,x3pa,x3p_percent,x2p,x2pa,x2p_percent,e_fg_percent,ft,fta,ft_percent,orb,drb,trb,ast,stl,blk,tov,pf,pts,trp_dbl\n'+
-   `2005,NBA,${fixtureName},nativfi01,25,ABC,PG,350,300,10000,2600,5000,.52,650,1800,.361,1950,3200,.609,.585,1500,1800,.833,100,300,400,1400,300,50,500,700,7350,4\n`+
-   '2005,NBA,Native fixture basketball reserve,nativfi02,24,ABC,SG,100,30,3500,400,1000,.40,150,500,.30,250,500,.50,.475,200,300,.667,50,100,150,400,70,20,150,150,1150,0\n';
-  const born=[
-   ['Q1000993','n/nativfi01','100001','1980-01-01T00:00:00Z'],
-   ['Q1000994','n/nativfi02','100002','1981-01-01T00:00:00Z'],
-  ].map(([id,profile,nba,date])=>Object.fromEntries(Object.entries({
-   person:'http://www.wikidata.org/entity/'+id,profile,nba,date,
+ const invalid=await page.evaluate(async()=>await (await fetch('/api/research/wikidata?ids=invalid&props=claims')).status);
+ if(invalid!==400)throw Error('Packaged desktop did not register or validate its facts endpoint');
+ await app.evaluate(({app},fixtureName)=>{
+  const original=globalThis.fetch;
+  const require=process.getBuiltinModule('node:module').createRequire(app.getAppPath()+'/package.json');
+  const {createWikidataBackend}=require('./wikidata-backend.cjs');
+  const calls=[];
+  const factsTransport=createWikidataBackend({version:app.getVersion(),fetchFn:async input=>{
+   const target=new URL(input);
+   const props=target.searchParams.get('props'),ids=target.searchParams.get('ids')?.split('|').sort();
+   if(target.origin!=='https://www.wikidata.org'||target.pathname!=='/w/api.php'||target.searchParams.get('action')!=='wbgetentities'){
+    throw Error('Unexpected facts provider request');
+   }
+   calls.push([props,ids]);
+   if(props==='claims'){
+    const claim=id=>({claims:{P106:[{rank:'normal',mainsnak:{
+     snaktype:'value',datavalue:{value:{'entity-type':'item',id}}
+    }}]}});
+    return Response.json({entities:{Q1000993:claim('Q1601'),Q1000994:claim('Q1602')}});
+   }
+   return Response.json({entities:{Q1601:{labels:{en:{value:'Lawyer'}}},Q1602:{labels:{en:{value:'Historian'}}}}});
+  }});
+  globalThis.nativeCombinedFixture={original,calls,factsTransport};
+  const bindings=[
+   ['Q1000993',fixtureName,'1980-01-01T00:00:00Z'],
+   ['Q1000994','Native fixture former officeholder','1981-01-01T00:00:00Z'],
+  ].map(([id,name,date])=>Object.fromEntries(Object.entries({
+   person:'http://www.wikidata.org/entity/'+id,name,date,
    place:'http://www.wikidata.org/entity/Q18094',placeName:'Honolulu',
    point:'Point(-157.8583 21.3069)',tz:'Pacific/Honolulu',cc:'US'
   }).map(([key,value])=>[key,{value}])));
   globalThis.fetch=async(input,init)=>{
-   const url=new URL(input instanceof Request?input.url:input);
-   const record=name=>globalThis.nativeCombinedFixture.calls.push(name);
-   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/Player%20Totals.csv')){
-    record('totals');return response(totals);
-   }
-   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/Player%20Career%20Info.csv')){
-    record('career profiles');return response('player_id,birth_date,pos,ht_in_in,wt,hof\nnativfi01,1980-01-01,PG,76,195,FALSE\nnativfi02,1981-01-01,SG,78,205,FALSE\n');
-   }
-   if(url.hostname==='raw.githubusercontent.com'&&url.pathname.endsWith('/library/data.py')){
-    record('directory');return response(`players = [\n    [100001, "Player", "Fixture", "${fixtureName}", True],\n    [100002, "Reserve", "Fixture", "Native fixture basketball reserve", False],\n]\n`);
-   }
-   if(url.hostname==='www.kaggle.com'&&url.pathname.endsWith('/Players.csv')){
-    record('player dates');return response('personId,birthdate\n100001,1980-01-01\n100002,1981-01-01\n');
-   }
-   if(url.origin==='https://query.wikidata.org'&&url.pathname==='/sparql'){
-    if(!url.searchParams.get('query')?.includes('n/nativfi01'))throw Error('Unexpected Wikidata cohort query during combined fixture');
-    record('birth claims');return Response.json({results:{bindings:born}});
-   }
-   return original(input,init);
+   const target=new URL(input instanceof Request?input.url:input);
+   if(target.origin!=='https://query.wikidata.org'||target.pathname!=='/sparql')return original(input,init);
+   if(!target.searchParams.get('query')?.includes('wd:Q14211'))throw Error('Unexpected officeholder search during combined fixture');
+   calls.push('officeholders');return Response.json({results:{bindings}});
   };
- },{fixtureName:nbaFixture});
+ },combinedFixture);
+ await page.exposeFunction('loadNativeWikidataFixture',url=>app.evaluate(async(_,requestUrl)=>{
+  const response=await globalThis.nativeCombinedFixture.factsTransport(new Request(requestUrl));
+  return {status:response.status,body:await response.json()};
+ },url));
+ await page.evaluate(()=>{
+  const original=globalThis.fetch;
+  globalThis.nativeCombinedRendererFetch=original;
+  globalThis.fetch=async(input,init)=>{
+   const target=new URL(input instanceof Request?input.url:input,location.href);
+   if(target.protocol!=='jyotish:'||target.pathname!=='/api/research/wikidata')return original(input,init);
+   const reply=await globalThis.loadNativeWikidataFixture(target.href);
+   return Response.json(reply.body,{status:reply.status});
+  };
+ });
  try{
   await openLabLauncher(page);
-  await page.locator('#research-cohort-prompt').fill('All NBA players');
+  await page.locator('#research-cohort-prompt').fill('All UK prime ministers');
   await page.locator('#research-cohort-data-toggle').click();
-  await page.locator('#research-cohort-data-prompt').fill(nbaDataPrompt);
+  await page.locator('#research-cohort-data-prompt').fill(combinedDataPrompt);
   await page.locator('#research-cohort-form button[type=submit]').click();
-  await page.locator('.research-cohort-data-review').waitFor();
-  await page.locator('#research-cohort-confirm').waitFor();
+  await page.locator('.research-cohort-data-review').getByText('Occupations',{exact:false}).first().waitFor();
   const before=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
-  if(before.length)throw Error('The native launcher fetched roster or stat sources before confirmation');
+  if(before.length)throw Error('The native launcher fetched officeholder or facts sources before confirmation');
   await page.locator('#research-cohort-confirm').click();
   await page.locator('#research-question').waitFor({timeout:60000});
-  await page.getByText(nbaFixture,{exact:true}).first().waitFor();
-  await page.locator('#research-question').fill(nbaAnalysis);
+  await page.getByText(combinedFixture,{exact:true}).first().waitFor();
+  await page.locator('#research-question').fill(combinedAnalysis);
   await page.locator('#research-query-form button[type=submit]').click();
   await page.locator('.research-data-review').waitFor();
   await page.locator('[data-r-action=run-review]').click();
   await page.locator('.research-results-data').waitFor({timeout:60000});
-  await checkStoredCombinedCohort(page);
+  await page.getByRole('tab',{name:'Notes',exact:true}).click();
+  await page.getByRole('tabpanel',{name:'Notes'}).getByRole('textbox',{name:'Topic notes'}).fill(combinedNote);
+  await page.getByRole('button',{name:'Save notes',exact:true}).click();
+  await page.getByText('Topic notes saved.',{exact:true}).waitFor();
+  const saved=await getCombinedEvidence(page);
   const calls=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
-  if(!calls.includes('birth claims')||!calls.includes('totals'))throw Error('The native combined import did not use its roster and stats sources');
-  const close=page.locator('[data-r-action=close-lab-topic]');
-  await close.click();
+  const expected=['officeholders',['claims',['Q1000993','Q1000994']],['labels',['Q1601','Q1602']]];
+  if(JSON.stringify(calls)!==JSON.stringify(expected))throw Error('The native import did not fetch the reviewed roster and facts: '+JSON.stringify(calls));
+  await page.getByRole('button',{name:'Archive topic',exact:true}).click();
+  await page.getByRole('dialog',{name:'Archive this topic?'}).getByRole('button',{name:'Archive topic',exact:true}).click();
   await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
-  await page.locator('#research-lab-topics').getByRole('button',{name:nbaTopic,exact:true}).click();
-  await page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:nbaAnalysis}).waitFor();
+  await page.locator(`[data-r-archived-topic="${saved.topicId}"]`).waitFor();
+  const archived=await getCombinedEvidence(page,{archived:true});
+  if(JSON.stringify(saved)!==JSON.stringify(archived))throw Error('Archiving changed the cohort analysis or attached data');
   await page.locator('[data-workspace=charts]').click();
-  console.log(JSON.stringify({nativeCombinedCohort:true,combinedReview:true,statsFiltered:true,retainedOnClose:true,fixtureSourceCalls:calls}));
+  console.log(JSON.stringify({nativeCombinedCohort:true,combinedReview:true,factsFiltered:true,archivedForRestart:true,fixtureSourceCalls:calls}));
  }finally{
+  await page.evaluate(()=>{
+   globalThis.fetch=globalThis.nativeCombinedRendererFetch;
+   delete globalThis.nativeCombinedRendererFetch;
+  });
   await app.evaluate(()=>{
    globalThis.fetch=globalThis.nativeCombinedFixture.original;
    delete globalThis.nativeCombinedFixture;
