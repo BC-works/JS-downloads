@@ -1,4 +1,20 @@
 // Run against the real packaged application, including its custom origin/worker.
+async function openLabLauncher(page,{allowResume=true}={}){
+ await page.locator('[data-workspace=research-lab]').click();
+ const prompt=page.locator('#research-cohort-prompt');
+ if(allowResume){
+  const activeTopic=page.locator('#research-question');
+  await prompt.or(activeTopic).first().waitFor();
+  if(await activeTopic.isVisible()){
+   const collapsed=page.locator('#research-lab-topics-toggle[aria-expanded=false]');
+   if(await collapsed.isVisible())await collapsed.click();
+   await page.locator('#research-lab-new-topic').click();
+  }
+ }
+ await prompt.waitFor();
+ await page.locator('#research-lab-topics').waitFor();
+}
+
 async function runClassicResearchNative(page,{reopen=false,legacy=false,expectExisting=false}={}){
  const original=await page.evaluate(()=>({saved:localStorage.getItem('jyotish-studio.saved.v1'),history:localStorage.getItem('jyotish-studio.history.v1'),tabs:JyotishStateDiagnostics().workspace.length}));
  const topic=await page.evaluate(async({reopen,expectExisting})=>{
@@ -49,14 +65,14 @@ async function runClassicResearchNative(page,{reopen=false,legacy=false,expectEx
  console.log(JSON.stringify({nativeResearch:true,reopen,legacy,expectExisting,customOrigin:page.url(),numericWorker:true,inspectorD9:true,pinned:true,primaryWorkspace:!legacy,topicTabs:!legacy,isolatedLibraries:true,releasedWorker:true}));
 }
 
-async function runLabResearchNative(page,{reopen=false,expectExisting=false}={}){
+async function runLabResearchNative(page,{reopen=false,expectExisting=false,expectLegacyPin=false,expectLauncher=false}={}){
  const title='Native Research Smoke',datasetTitle='Native CSV evidence';
  const question='Distribution of Moon signs where Minutes played >= 10';
  const original=await page.evaluate(()=>({
   saved:localStorage.getItem('jyotish-studio.saved.v1'),
   history:localStorage.getItem('jyotish-studio.history.v1'),tabs:JyotishStateDiagnostics().workspace.length
  }));
- const topic=await page.evaluate(async({title,reopen,expectExisting})=>{
+ const topic=await page.evaluate(async({title,question,reopen,expectExisting,expectLegacyPin})=>{
   const {createResearchStore,addResearchMembers}=await import('/research-storage.mjs');
   const store=await createResearchStore();
   try{
@@ -73,30 +89,40 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false}={})
     project=await store.saveProject(next,{expectedRevision:project.revision});
    }
    if(project.notes!=='Retained native Research notes'||project.members.length!==1)throw Error('Research topic data changed');
-   if(expectExisting){
+   if(expectLegacyPin){
     if(project.pins.length!==1)throw Error('Previous installer pin was not retained');
     const pin=await store.getPin(project.pins[0].id);
     if(pin.notes!=='Frozen native Research evidence')throw Error('Pinned evidence was not retained');
    }
-   return {id:project.id,memberId:project.members[0].id};
+   const priorResult=(await store.listPromptResults(project.id)).find(prompt=>prompt.query===question);
+   if((reopen||expectExisting&&!expectLegacyPin)&&!priorResult)throw Error('Saved Research Lab result did not survive startup');
+   return {id:project.id,memberId:project.members[0].id,priorResultId:priorResult?.id};
   }finally{store.close();}
- },{title,reopen,expectExisting});
+ },{title,question,reopen,expectExisting,expectLegacyPin});
 
  await page.locator('[data-workspace=research]').click();
  await page.locator(`[data-r-library-topic="${topic.id}"]`).click();
  await page.locator('#continue-research').waitFor();
  if(await page.locator('#research-question').count())throw Error('Research Library exposed the Lab prompt');
- if(expectExisting){
+ if(expectLegacyPin){
   await page.locator('[data-r-library-view=analyses]').click();
   await page.getByRole('button',{name:'Native Moon sign result'}).click();
   await page.getByText('Frozen native Research evidence',{exact:true}).waitFor();
  }
- await page.locator('#continue-research').click();
+ const labTopic=page.locator(`[data-r-lab-topic="${topic.id}"]`);
+ if(expectLauncher){
+  await openLabLauncher(page,{allowResume:reopen||expectExisting});
+  await labTopic.click();
+  await page.locator('#research-lab-topics-toggle[aria-expanded=false]').waitFor();
+ }else{
+  await page.locator('#continue-research').click();
+  await page.locator(`#research-topic-tabs-slot [data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
+ }
  await page.locator('[data-workspace=research-lab][aria-pressed=true]').waitFor();
- await page.locator(`#research-topic-tabs-slot [data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
+ await page.locator('#research-question').waitFor();
  if(await page.locator('[data-chart-document],.document-tabs').count())throw Error('Chart navigation leaked into Research Lab');
 
- if(!reopen){
+ if(!topic.priorResultId){
   await page.locator('#research-add-data').click();
   const dialog=page.getByRole('dialog',{name:'Add data'});
   await dialog.locator('#research-data-csv').setInputFiles({
@@ -115,6 +141,7 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false}={})
  const savedQuestion=page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:question});
  await savedQuestion.waitFor({timeout:60000});
  const savedId=await savedQuestion.getAttribute('data-r-prompt');
+ if(topic.priorResultId&&savedId!==topic.priorResultId)throw Error('Research Lab replaced the saved result during upgrade');
  await savedQuestion.click();
  await page.locator('.research-results-data').waitFor();
  const evidence=await page.evaluate(async({topicId,savedId,datasetTitle})=>{
@@ -140,10 +167,17 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false}={})
  await page.locator('.research-inspector svg[aria-label="D9 South Indian chart"]').waitFor();
  await page.locator('.research-inspector-positions').waitFor();
  await page.locator('[data-r-action=close-inspector]').click();
- await page.locator(`[data-r-close-topic="${topic.id}"]`).click();
- await page.locator(`[data-r-topic-tab="${topic.id}"]`).waitFor({state:'detached'});
- await page.locator('#research-topic').selectOption(topic.id);
- await page.locator(`[data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
+ if(expectLauncher){
+  await page.locator('#research-lab-topics-toggle').click();
+  await labTopic.waitFor();
+  await labTopic.click();
+  await page.locator('#research-lab-topics-toggle[aria-expanded=false]').waitFor();
+ }else{
+  await page.locator(`[data-r-close-topic="${topic.id}"]`).click();
+  await page.locator(`[data-r-topic-tab="${topic.id}"]`).waitFor({state:'detached'});
+  await page.locator('#research-topic').selectOption(topic.id);
+  await page.locator(`[data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
+ }
  await page.locator(`[data-r-prompt="${savedId}"]`).waitFor();
 
  await page.locator('[data-workspace=charts]').click();
@@ -156,7 +190,8 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false}={})
  if(after.saved!==original.saved||after.history!==original.history||after.tabs!==original.tabs)throw Error('Research changed Saved, History or main chart tabs');
  if(after.worker.worker||after.worker.pending||after.retainedEvidence!==0||after.retainedMembers!==0)throw Error('Research retained the worker or chart evidence on exit');
  console.log(JSON.stringify({nativeResearchLab:true,reopen,numericWorker:true,customOrigin:page.url(),
-  csvFilter:true,datasetVersionRetained:true,inspectorD9:true,legacyPinRetained:expectExisting,releasedWorker:true}));
+  csvFilter:true,datasetVersionRetained:true,inspectorD9:true,savedQuestionRetained:!!topic.priorResultId,
+  legacyPinRetained:expectLegacyPin,desktopLauncher:expectLauncher,releasedWorker:true}));
 }
 
 async function runResearchNative(page,options={}){
@@ -164,4 +199,4 @@ async function runResearchNative(page,options={}){
   ?runLabResearchNative(page,options)
   :runClassicResearchNative(page,options);
 }
-module.exports={runResearchNative};
+module.exports={runResearchNative,openLabLauncher};
