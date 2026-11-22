@@ -3,15 +3,19 @@ const {openLabLauncher}=require('./research-native-smoke.cjs');
 
 async function verifyDiscoveredCohort(app,page){
  const title='Meridian instrument fellows';
- const prompt='First-edition fellows in the Meridian musical instrument fellowship';
+ const group='Meridian musical instrument fellowship recipients';
+ const original=group+' along with their instruments';
+ const question='Which edition of the fellowship should I include?';
+ const answer='The first edition only.';
+ const groupAfterReply='First-edition fellows in the Meridian musical instrument fellowship';
  const source='https://catalogue.meridian-foundation.org/fellows/first-edition.csv';
  const first='Rowan Native Fixture',second='Asha Native Fixture';
- await app.evaluate(({app},{title,source,first,second,prompt})=>{
+ await app.evaluate(({app},{title,source,first,second,group,original,question,answer,groupAfterReply})=>{
   const require=process.getBuiltinModule('node:module').createRequire(app.getAppPath()+'/package.json');
   const {createCohortBackend}=require('./research-cohort-backend.cjs');
   const {createDatasetStore}=require('./research-source-plans.cjs');
   const path=process.getBuiltinModule('node:path');
-  const calls={search:0,read:0};
+  const calls={intent:0,search:0,read:0};
   const mapping={
    format:'csv',rowsPath:null,childrenPath:null,tableIndex:null,nextPath:null,
    fields:{id:'id',name:'name',firstName:null,lastName:null,sourceUrl:null,birthDate:'dob',birthTime:null,
@@ -19,7 +23,7 @@ async function verifyDiscoveredCohort(app,page){
    filters:[],properties:[{key:'instrument',label:'Instrument',type:'text',unit:null,path:'instrument'}]
   };
   const plan={outcome:'source',message:null,title,description:'First-edition fellows on the published Meridian instrument fellowship roster.',
-   membership:[{phrase:prompt,filterIndex:null,explanation:'The first-edition roster lists admitted fellowship participants.'}],
+   membership:[{phrase:groupAfterReply,filterIndex:null,explanation:'The first-edition roster lists admitted fellowship participants.'}],
    rules:['Include each fellow on the first-edition roster once.'],limitations:['The register covers its first edition only.'],
    unavailableFields:[],roster:{label:'Meridian fellowship register',url:source,evidenceUrl:source,identityNamespace:'meridian-fellows',mapping},supplement:null};
   const message=body=>({type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(body)}]});
@@ -30,8 +34,23 @@ async function verifyDiscoveredCohort(app,page){
     if(url.startsWith('https://www.wikidata.org/w/api.php'))return Response.json({search:[]});
     if(url!=='https://api.openai.com/v1/responses')throw Error('Unexpected native fixture upstream URL');
     const req=JSON.parse(options.body);
-    if(!req.tools?.some(tool=>tool.type.startsWith('web_search')))return Response.json({status:'completed',output:[message({kind:'unsupported',message:'A dedicated register is needed.',data:{provider:'unsupported',fields:null,message:'This field comes from the register.'}})]});
-    if(req.store!==false)throw Error('Source discovery must disable provider response storage');
+    const input=JSON.parse(req.input);
+    if(req.store!==false)throw Error('Research must disable provider response storage');
+    if(req.text?.format?.name==='research_cohort_intent'){
+     calls.intent++;
+     const turns=input.clarifications||[],reply=turns.at(-1);
+     if(input.groupRequest!==original||turns.length>1||reply&&(reply.question!==question||reply.answer!==answer)){
+      throw Error('The model did not receive the original prompt and its clarification');
+     }
+     const intent={parts:[{role:'group',text:group},{role:'data',text:'along with their instruments'}],
+      groupPrompt:reply?groupAfterReply:group,dataPrompt:'Instrument',question:reply?null:question};
+     const interpretation={kind:'unsupported',id:null,occupation:null,relation:null,entity:null,country:null,
+      message:'A dedicated fellowship register is needed.',data:{provider:'unsupported',fields:null,message:'Look up the published instrument.'},intent};
+     return Response.json({status:'completed',output:[message(interpretation)]});
+    }
+    if(!req.tools?.some(tool=>tool.type==='web_search')||input.group!==groupAfterReply||input.data!=='Instrument'){
+     throw Error('Discovery lost the clarified population or the originally requested data');
+    }
     calls.search++;
     return Response.json({status:'completed',output:[
      {type:'web_search_call',status:'completed',action:{type:'search',sources:[{type:'url',url:source}]}},message(plan)
@@ -46,7 +65,7 @@ async function verifyDiscoveredCohort(app,page){
    }
   });
   globalThis.nativeDiscoveredFixture={handle,calls};
- },{title,source,first,second,prompt});
+ },{title,source,first,second,group,original,question,answer,groupAfterReply});
  await page.exposeFunction('nativeDiscoveryFixtureRequest',payload=>app.evaluate(async(_,body)=>{
   const url='jyotish://app/api/research/cohort';
   const result=await globalThis.nativeDiscoveredFixture.handle(new Request(url,{method:'POST',headers:{'Content-Type':'application/json'},body}));
@@ -78,10 +97,14 @@ async function verifyDiscoveredCohort(app,page){
  }
  try{
   await openLabLauncher(page);
-  await page.locator('#research-cohort-prompt').fill(prompt);
-  await page.locator('#research-cohort-data-toggle').click();
-  await page.locator('#research-cohort-data-prompt').fill('Instrument');
+  await page.locator('#research-cohort-prompt').fill(original);
   await page.locator('#research-cohort-form button[type=submit]').click();
+  await page.getByText(question,{exact:true}).waitFor();
+  const reply=page.getByRole('textbox',{name:'Your reply',exact:true});
+  await reply.waitFor();
+  if(await read()||await page.locator('#research-cohort-confirm').isVisible())throw Error('Clarifying a request started collection early');
+  await reply.fill(answer);
+  await page.getByRole('button',{name:'Send reply',exact:true}).click();
   const example=page.locator('.research-cohort-example');
   await example.getByText(first,{exact:false}).first().waitFor();
   await example.getByText(/Violin/).first().waitFor();
@@ -93,9 +116,9 @@ async function verifyDiscoveredCohort(app,page){
   await page.locator('#research-question').waitFor({timeout:60000});
   const saved=await read(),calls=await app.evaluate(()=>globalThis.nativeDiscoveredFixture.calls);
   if(!saved||saved.names.length!==1||saved.names[0]!==first||saved.known!==false||saved.stats.discovered!==2||saved.stats.missingDates!==1||
-   !saved.values.includes('Violin')||!saved.sources.includes(source)||calls.search!==1||calls.read<1)throw Error('The installed discovery workflow did not retain the reviewed source fields and exclusions: '+JSON.stringify({saved,calls}));
+   !saved.values.includes('Violin')||!saved.sources.includes(source)||calls.intent!==2||calls.search!==1||calls.read<1)throw Error('The installed discovery workflow did not retain the reviewed source fields and exclusions: '+JSON.stringify({saved,calls}));
   await page.locator('[data-workspace=charts]').click();
-  console.log(JSON.stringify({nativePublicDataset:true,modelSearchSimulated:true,sourceExample:true,independentCollectionReport:true,verifiedCsvData:true,calls}));
+  console.log(JSON.stringify({nativePublicDataset:true,singlePrompt:true,conversationalClarification:true,modelSearchSimulated:true,sourceExample:true,independentCollectionReport:true,verifiedCsvData:true,calls}));
  }finally{
   await page.evaluate(()=>{globalThis.fetch=globalThis.nativeOriginalDiscoveryFetch;delete globalThis.nativeOriginalDiscoveryFetch;});
   await app.evaluate(()=>{delete globalThis.nativeDiscoveredFixture;});

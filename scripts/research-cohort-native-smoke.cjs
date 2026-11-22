@@ -7,7 +7,6 @@ const modelPrompt='Please find everyone who occupied the top elected office in t
 const fakeKey='sk-native-smoke-fake-key';
 const combinedTopic='UK prime ministers';
 const combinedFixture='Native fixture officeholder';
-const combinedDataPrompt='Occupations';
 const combinedAnalysis='Distribution of Moon signs where Occupations contains "Lawyer"';
 const combinedNote='Retain these cohort notes through archive and restart';
 
@@ -210,9 +209,7 @@ async function verifyNativeCombinedCohort(app,page){
  });
  try{
   await openLabLauncher(page);
-  await page.locator('#research-cohort-prompt').fill('All UK prime ministers');
-  await page.locator('#research-cohort-data-toggle').click();
-  await page.locator('#research-cohort-data-prompt').fill(combinedDataPrompt);
+  await page.locator('#research-cohort-prompt').fill('All UK prime ministers and attach their occupations');
   await page.locator('#research-cohort-form button[type=submit]').click();
   await page.locator('.research-cohort-data-review').getByText('Occupations',{exact:false}).first().waitFor();
   await approveCollection(page,combinedFixture);
@@ -305,11 +302,12 @@ async function installWindowsPlannerFixture(app,model){
    }
    if(target!=='https://api.openai.com/v1/responses')throw Error('Unexpected upstream request during model review');
    const body=JSON.parse(init.body);
-   if(init.method!=='POST'||authorization!=='Bearer '+fakeKey||body.model!==model||body.input!==prompt||body.store!==false){
+   if(init.method!=='POST'||authorization!=='Bearer '+fakeKey||body.model!==model||body.text?.format?.name!=='research_cohort_intent'||JSON.parse(body.input).groupRequest!==prompt||body.store!==false){
     throw Error('Research did not use the exact selected account model');
    }
    fixture.plans++;
-   const plan={kind:'named',id:'us-presidents',group:null,occupation:null,relation:null,entity:null,country:null,message:null};
+   const plan={kind:'named',id:'us-presidents',occupation:null,relation:null,entity:null,country:null,message:null,data:null,
+    intent:{parts:[{role:'group',text:prompt}],groupPrompt:prompt,dataPrompt:'',question:null}};
    return Response.json({status:'completed',output:[{
     type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(plan)}]
    }]});
