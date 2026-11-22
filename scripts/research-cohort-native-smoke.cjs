@@ -148,7 +148,10 @@ async function checkStoredCombinedCohort(page){
  await row.waitFor({state:'detached'});
  await page.locator('#research-lab-topics').getByRole('button',{name:combinedTopic,exact:true}).click();
  await page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:combinedAnalysis}).click();
- await page.locator('.research-results-data').getByText('Wikidata biographical facts',{exact:false}).first().waitFor();
+ const receipt=page.locator('.research-results-data');
+ await receipt.waitFor();
+ if(await receipt.getAttribute('open')===null)await receipt.locator('summary').click();
+ await receipt.getByText('Wikidata biographical facts',{exact:false}).first().waitFor();
  const restored=await getCombinedEvidence(page);
  if(JSON.stringify(stored)!==JSON.stringify(restored))throw Error('Restoring the archived cohort changed its result or dataset reference');
  await page.locator('[data-workspace=charts]').click();
