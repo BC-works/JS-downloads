@@ -167,4 +167,42 @@ async function verifyLivePublicRegister(app){
  if(evidence.rows<300||Math.min(evidence.withNames,evidence.withBirthDates,evidence.withParty)<300)throw Error('Packaged public CSV returned insufficient evidence: '+JSON.stringify(evidence));
  console.log(JSON.stringify({livePublicCongressRegister:true,...evidence}));
 }
-module.exports={verifyDiscoveredCohort,verifyLivePublicRegister};
+async function verifyLiveCareerSearch(page){
+ await openLabLauncher(page);
+ const prompt='all historical and current nba players and their career averages + games played please';
+ await page.locator('#research-cohort-prompt').fill(prompt);
+ await page.locator('#research-cohort-form button[type=submit]').click();
+ try{
+  await page.locator('.research-cohort-example').waitFor({timeout:65000});
+  await page.locator('#research-cohort-confirm').click();
+  await page.locator('#research-cohort-start').waitFor({timeout:300000});
+  await page.locator('#research-cohort-start').click();
+  await page.locator('#research-question').waitFor({timeout:60000});
+ }catch(error){
+  const visible=await page.locator('body').innerText();
+  throw Error('Live research flow stopped: '+visible.slice(-2500)+' · '+error.message);
+ }
+ const summary=await page.evaluate(async prompt=>{
+  const {createResearchStore}=await import('/research-storage.mjs');
+  const {rosterRecords}=await import('/research-roster.mjs');
+  const store=await createResearchStore();
+  try{
+   const entry=(await store.listProjects()).find(r=>r.name==='NBA players');
+   const project=await store.getProject(entry.id),report=project.cohort;
+   if(report.prompt!==prompt)throw Error('Live topic did not retain the submitted request');
+   const roster=rosterRecords(project,await store.getResearchDatasets(entry.id));
+   const named=roster.people.find(person=>person.name==='Michael Jordan');
+   const key=label=>roster.fields.find(f=>f.label===label)?.id;
+   const games=key('Career games played'),ppg=key('Points per game');
+   return {people:roster.people.length,charted:project.members.length,noon:report.stats.unknownTimes,recordedTimes:report.stats.knownTimes,withDate:roster.people.filter(p=>p.date).length,
+     withPpg:roster.people.filter(p=>p.values.has(ppg)).length,
+     jordan:{games:[...named.values.get(games)][0],ppg:[...named.values.get(ppg)][0]},
+     coverage:report.criteria.description,source:report.sources.find(s=>s.url.includes('/versions/'))?.url};
+  }finally{store.close();}
+ },prompt);
+ if(summary.people<4800||summary.charted<100||summary.withPpg<4700||summary.jordan.games!==1072||Math.abs(summary.jordan.ppg-32292/1072)>0.00001)
+  throw Error('Live topic statistics failed verification: '+JSON.stringify(summary));
+ console.log(JSON.stringify({liveCareerPrompt:true,...summary}));
+ await page.locator('[data-workspace=charts]').click();
+}
+module.exports={verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch};

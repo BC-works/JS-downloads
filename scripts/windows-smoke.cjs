@@ -1,7 +1,7 @@
 const fs=require('node:fs'),path=require('node:path');
 const {_electron}=require(process.argv[3]);
 const expectedVersion=process.argv[5]||JSON.parse(fs.readFileSync('staging/manifest.json','utf8')).tag.slice(1);
-let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke timeout at '+phase);process.exit(1);},120000);
+let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke timeout at '+phase);process.exit(1);},480000);
 (async()=>{
  console.log('SMOKE launch');const app=await _electron.launch({executablePath:process.argv[2],timeout:60000});
  try{phase='first window';console.log('SMOKE first window');const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));phase='form';console.log('SMOKE wait for form');await page.waitForSelector('#birth-form',{timeout:60000});console.log('SMOKE form ready');
@@ -53,9 +53,11 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    phase='cohort and Wikidata facts';
    await verifyNativeCombinedCohort(app,page);
    phase='public dataset discovery';
-   const {verifyDiscoveredCohort,verifyLivePublicRegister}=require('./research-discovered-native-smoke.cjs');
+   const {verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch}=require('./research-discovered-native-smoke.cjs');
    await verifyDiscoveredCohort(app,page);
    await verifyLivePublicRegister(app);
+   phase='live player and career search';
+   await verifyLiveCareerSearch(page);
    phase='native planner';
    await verifyWindowsPlanner(app,page);
   }else if(process.argv[4]==='reopen'){
