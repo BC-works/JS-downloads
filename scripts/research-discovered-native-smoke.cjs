@@ -114,7 +114,7 @@ async function verifyDiscoveredCohort(app,page){
   const example=page.locator('.research-cohort-example');
   await example.getByText(first,{exact:false}).first().waitFor();
   await example.getByText(/Violin/).first().waitFor();
-  await page.getByText(/Estimated topic storage.*for 2 people/).waitFor();
+  await page.getByText(/Estimated subject storage.*for 2 people/).waitFor();
   if(await read())throw Error('Preview committed a topic');
   await page.locator('#research-cohort-confirm').click();
   await page.locator('.research-collection-preview').waitFor({timeout:60000});
@@ -122,8 +122,8 @@ async function verifyDiscoveredCohort(app,page){
   if(await read())throw Error('Collection committed a topic before report approval');
   await page.locator('#research-cohort-start').click();
   await page.locator('#research-question').waitFor({timeout:60000});
-  await page.getByRole('button',{name:'Topic settings',exact:true}).click();
-  await page.locator('[data-topic-storage]').filter({hasText:/Topic data · [0-9]/}).waitFor();
+  await page.getByRole('button',{name:'Subject settings',exact:true}).click();
+  await page.locator('[data-topic-storage]').filter({hasText:/Subject data · [0-9]/}).waitFor();
   await page.keyboard.press('Escape');
   await page.locator('[data-r-action=roster-data][data-r-person]').click();
   const personDialog=page.getByRole('dialog');

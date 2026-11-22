@@ -55,7 +55,7 @@ async function approveCollection(page,fixture){
  await page.locator('#research-cohort-confirm').click();
  const report=page.locator('.research-collection-preview');
  await report.waitFor({timeout:60000});
- if(JSON.stringify(before)!==JSON.stringify(await savedResearchTopics(page)))throw Error('A Research topic was saved before accepting the collection report');
+ if(JSON.stringify(before)!==JSON.stringify(await savedResearchTopics(page)))throw Error('A Research subject was saved before accepting the collection report');
  await page.locator('#research-cohort-start').click();
  await page.locator('#research-question').waitFor({timeout:60000});
 }
@@ -220,15 +220,15 @@ async function verifyNativeCombinedCohort(app,page){
   await page.locator('[data-r-action=run-review]').click();
   await page.locator('.research-results-data').waitFor({timeout:60000});
   await page.getByRole('tab',{name:'Notes',exact:true}).click();
-  await page.getByRole('tabpanel',{name:'Notes'}).getByRole('textbox',{name:'Topic notes'}).fill(combinedNote);
+  await page.getByRole('tabpanel',{name:'Notes'}).getByRole('textbox',{name:'Subject notes'}).fill(combinedNote);
   await page.getByRole('button',{name:'Save notes',exact:true}).click();
-  await page.getByText('Topic notes saved.',{exact:true}).waitFor();
+  await page.getByText('Subject notes saved.',{exact:true}).waitFor();
   const saved=await getCombinedEvidence(page);
   const calls=await app.evaluate(()=>globalThis.nativeCombinedFixture.calls);
   const fullFacts=calls.some(call=>Array.isArray(call)&&call[0]==='claims'&&call[1].includes('Q1000993')&&call[1].includes('Q1000994'));
   if(calls.filter(call=>call==='officeholders').length<2||!fullFacts)throw Error('The native import did not verify a sample and collect the reviewed roster and facts: '+JSON.stringify(calls));
-  await page.getByRole('button',{name:'Archive topic',exact:true}).click();
-  await page.getByRole('dialog',{name:'Archive this topic?'}).getByRole('button',{name:'Archive topic',exact:true}).click();
+  await page.getByRole('button',{name:'Archive subject',exact:true}).click();
+  await page.getByRole('dialog',{name:'Archive this subject?'}).getByRole('button',{name:'Archive subject',exact:true}).click();
   await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
   await page.locator(`[data-r-archived-topic="${saved.topicId}"]`).waitFor();
   const archived=await getCombinedEvidence(page,{archived:true});
@@ -396,7 +396,7 @@ async function verifyTopicModel(app,page){
    const body=JSON.parse(options.body);fixture.calls++;
    if(body.model!=='gpt-5-mini'||body.store!==false||body.tools||body.text.format.name!=='topic_question')throw Error('Wrong topic model request');
    const scope=JSON.parse(body.input);
-   if(Object.keys(scope).length!==2||!scope.fields.some(f=>f.label==='Points per game')||scope.fields.some(f=>Object.keys(f).some(k=>!['dataset','version','label','key','type','unit'].includes(k))))throw Error('Unexpected topic data sent to model');
+   if(Object.keys(scope).length!==2||!scope.fields.some(f=>f.label==='Points per game')||scope.fields.some(f=>Object.keys(f).some(k=>!['dataset','version','label','key','type','unit'].includes(k))))throw Error('Unexpected subject data sent to model');
    return Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify({query:'What do these charts have in common where Points per game > 20',clarification:null})}]}]});
   };
  });
