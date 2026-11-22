@@ -62,6 +62,8 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    await verifyLiveResearchMatrix(page);
    phase='native planner';
    await verifyWindowsPlanner(app,page);
+   phase='independent Ask Jyotish topic model';
+   await require('./research-cohort-native-smoke.cjs').verifyTopicModel(app,page);
   }else if(process.argv[4]==='reopen'){
    phase='retained native cohort';
    const {checkStoredCohort,checkStoredCombinedCohort,verifyWindowsPlanner}=require('./research-cohort-native-smoke.cjs');

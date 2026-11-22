@@ -386,4 +386,44 @@ async function verifyWindowsPlanner(app,page,{reopen=false}={}){
  }
 }
 
-module.exports={verifyNativeCohort,checkStoredCohort,verifyNativeCombinedCohort,checkStoredCombinedCohort,verifyWindowsPlanner,verifyWindowsPlannerMigration};
+async function verifyTopicModel(app,page){
+ const question='Find celestial fingerprints among scorers exceeding 20 career points per game';
+ await app.evaluate(()=>{
+  const fixture={original:globalThis.fetch,calls:0};globalThis.topicModelQA=fixture;
+  globalThis.fetch=async(url,options)=>{
+   if(String(url)==='https://api.openai.com/v1/models')return Response.json({data:['gpt-4.1-nano','gpt-5-mini'].map(id=>({id}))});
+   if(String(url)!=='https://api.openai.com/v1/responses')return fixture.original(url,options);
+   const body=JSON.parse(options.body);fixture.calls++;
+   if(body.model!=='gpt-5-mini'||body.store!==false||body.tools||body.text.format.name!=='topic_question')throw Error('Wrong topic model request');
+   const scope=JSON.parse(body.input);
+   if(Object.keys(scope).length!==2||!scope.fields.some(f=>f.label==='Points per game')||scope.fields.some(f=>Object.keys(f).some(k=>!['dataset','version','label','key','type','unit'].includes(k))))throw Error('Unexpected topic data sent to model');
+   return Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify({query:'What do these charts have in common where Points per game > 20',clarification:null})}]}]});
+  };
+ });
+ try{
+  await openLabLauncher(page);
+  await page.locator('#research-lab-topics').getByRole('button',{name:'NBA players',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Jyotish settings'}).click();
+  const dialog=page.getByRole('dialog',{name:'Ask Jyotish settings'});
+  const choice=dialog.getByLabel('Research model',{exact:true});
+  await choice.locator('option[value="gpt-5-mini"]').waitFor({state:'attached'});
+  if((await page.evaluate(()=>JyotishDesktopResearchModel.topicStatus())).model!==null)throw Error('Topic model should start local only');
+  await choice.selectOption('gpt-5-mini');
+  await dialog.getByRole('button',{name:'Save changes'}).click();
+  await page.waitForFunction(async()=>(await JyotishDesktopResearchModel.topicStatus()).model==='gpt-5-mini');
+  if((await page.evaluate(()=>JyotishDesktopResearchModel.status())).model!=='gpt-4.1-nano')throw Error('Launchpad model changed');
+  await dialog.getByRole('button',{name:'Close planner settings'}).click();
+  for(let i=0;i<2;i++){
+   await page.locator('#research-question').fill(question);
+   await page.locator('#research-query-form button[type=submit]').click();
+   await page.getByRole('button',{name:'Interpret with model'}).click();
+   await page.locator('.research-review').getByText('Model interpretation',{exact:true}).waitFor();
+   if(!await page.locator('[data-r-action=run-review]').isEnabled())throw Error('Model rewrite bypassed or failed local review');
+  }
+  const calls=await app.evaluate(()=>globalThis.topicModelQA.calls);
+  if(calls!==1)throw Error('Repeated question incurred another model call');
+  console.log(JSON.stringify({nativeTopicModel:true,independentModels:true,sharedEncryptedKey:true,explicitFallback:true,providerSimulated:true,modelCalls:calls}));
+  await page.locator('[data-workspace=charts]').click();
+ }finally{await app.evaluate(()=>{globalThis.fetch=globalThis.topicModelQA.original;delete globalThis.topicModelQA;});}
+}
+module.exports={verifyTopicModel,verifyNativeCohort,checkStoredCohort,verifyNativeCombinedCohort,checkStoredCombinedCohort,verifyWindowsPlanner,verifyWindowsPlannerMigration};

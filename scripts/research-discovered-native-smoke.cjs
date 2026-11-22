@@ -195,7 +195,7 @@ async function verifyLiveCareerSearch(page){
    const key=label=>roster.fields.find(f=>f.label===label)?.id;
    const games=key('Career games played'),ppg=key('Points per game');
    return {people:roster.people.length,charted:project.members.length,noon:report.stats.unknownTimes,recordedTimes:report.stats.knownTimes,withDate:roster.people.filter(p=>p.date).length,
-     withPpg:roster.people.filter(p=>p.values.has(ppg)).length,
+     withPpg:roster.people.filter(p=>p.values.has(ppg)).length,over20InRoster:roster.people.filter(p=>p.values.has(ppg)&&Number([...p.values.get(ppg)][0])>20).length,
      jordan:{games:[...named.values.get(games)][0],ppg:[...named.values.get(ppg)][0]},
      coverage:report.criteria.description,source:report.sources.find(s=>s.url.includes('/versions/'))?.url};
   }finally{store.close();}
@@ -203,6 +203,29 @@ async function verifyLiveCareerSearch(page){
  if(summary.people<4800||summary.charted<100||summary.withPpg<4700||summary.jordan.games!==1072||Math.abs(summary.jordan.ppg-32292/1072)>0.00001)
   throw Error('Live topic statistics failed verification: '+JSON.stringify(summary));
  console.log(JSON.stringify({liveCareerPrompt:true,...summary}));
+ const question='What do all players with > 20ppg have in common';
+ await page.getByRole('button',{name:'Ask Jyotish settings'}).waitFor();
+ await page.locator('#research-question').fill(question);
+ await page.locator('#research-query-form button[type=submit]').click();
+ const review=page.locator('.research-review');
+ await review.getByText(/Points per game/i).first().waitFor();
+ await review.locator('[data-r-action=run-review]').click();
+ await page.locator('.research-results-data').waitFor({timeout:120000});
+ const filtered=await page.evaluate(async question=>{
+  const {createResearchStore}=await import('/research-storage.mjs');
+  const store=await createResearchStore();
+  try{
+   const project=(await store.listProjects()).find(p=>p.name==='NBA players');
+   const prompt=(await store.listPromptResults(project.id)).find(q=>q.query===question);
+   const {result,plan}=await store.getPromptResult(project.id,prompt.id);
+   const filter=plan.dataFilter;
+   return {operator:filter.operator,value:filter.value,eligible:result.eligible,noon:result.context.birthTime.unknownIncluded,
+    matched:result.context.data.matched,positiveFindings:result.findings.length,first:result.findings[0]?.label};
+  }finally{store.close();}
+ },question);
+ if(filtered.operator!=='gt'||filtered.value!==20||!filtered.eligible||filtered.eligible!==filtered.noon||!filtered.positiveFindings)
+  throw Error('The inline data threshold or noon eligibility failed: '+JSON.stringify(filtered));
+ console.log(JSON.stringify({liveInlineTopicQuestion:true,...filtered}));
  await page.locator('[data-workspace=charts]').click();
 }
 // Exercise the installed app endpoint with natural language and live public sources.
