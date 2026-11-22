@@ -4,7 +4,7 @@ const {openLabLauncher}=require('./research-native-smoke.cjs');
 async function verifyDiscoveredCohort(app,page){
  const title='Meridian instrument fellows';
  const group='Meridian musical instrument fellowship recipients';
- const original=group+' along with their instruments';
+ const original=group+' along with their instruments and number of performances';
  const question='Which edition of the fellowship should I include?';
  const answer='The first edition only.';
  const groupAfterReply='First-edition fellows in the Meridian musical instrument fellowship';
@@ -42,21 +42,27 @@ async function verifyDiscoveredCohort(app,page){
      if(input.groupRequest!==original||turns.length>1||reply&&(reply.question!==question||reply.answer!==answer)){
       throw Error('The model did not receive the original prompt and its clarification');
      }
-     const intent={parts:[{role:'group',text:group},{role:'data',text:'along with their instruments'}],
-      groupPrompt:reply?groupAfterReply:group,dataPrompt:'Instrument',question:reply?null:question};
+     const intent={parts:[{role:'group',text:group},{role:'data',text:'along with their instruments and number of performances'}],
+      groupPrompt:reply?groupAfterReply:group,dataPrompt:'Instruments and number of performances',question:reply?null:question};
      const interpretation={kind:'unsupported',id:null,occupation:null,relation:null,entity:null,country:null,
       message:'A dedicated fellowship register is needed.',data:{provider:'unsupported',fields:null,message:'Look up the published instrument.'},intent};
      return Response.json({status:'completed',output:[message(interpretation)]});
     }
-    if(!req.tools?.some(tool=>tool.type==='web_search')||input.group!==groupAfterReply||input.data!=='Instrument'){
+    if(!req.tools?.some(tool=>tool.type==='web_search')||input.group!==groupAfterReply||input.data!==(input.membershipOnly?'':'Instruments and number of performances')){
      throw Error('Discovery lost the clarified population or the originally requested data');
     }
     calls.search++;
+    const performances=source.replace('first-edition','performances');
+    const facts={...plan.roster,url:performances,evidenceUrl:performances,mapping:{format:'csv',fields:{id:'id',name:'name'},
+     rollup:{grain:'One performance',rowKeys:['event'],metrics:[{key:'performances',label:'Performances',op:'countDistinct',path:'event'}]}}};
+    const proposal=input.membershipOnly?{...plan,roster:{...plan.roster,mapping:{...mapping,properties:[]}}}:
+     input.verifiedRoster?{...plan,supplement:facts}:{outcome:'unavailable',message:'No combined register.'};
     return Response.json({status:'completed',output:[
-     {type:'web_search_call',status:'completed',action:{type:'search',sources:[{type:'url',url:source}]}},message(plan)
+     {type:'web_search_call',status:'completed',action:{type:'search',sources:[{type:'url',url:source},{type:'url',url:performances}]}},message(proposal)
     ]});
    },
    fetchPublicDataset:async url=>{
+    if(url===source.replace('first-edition','performances')){calls.read++;return new Response(['id,name,event','m01,'+first+',p1','m01,'+first+',p2','m02,'+second+',p1'].join('\n'));}
     if(url!==source)throw Error('The importer requested an unreviewed source');
     calls.read++;
     const csv=['id,name,dob,place,lat,lon,zone,instrument','m01,'+first+',1984-01-01,Honolulu,21.307,-157.859,Pacific/Honolulu,Violin','m02,'+second+',,Honolulu,21.307,-157.859,Pacific/Honolulu,Cello'].join('\n');
@@ -119,11 +125,24 @@ async function verifyDiscoveredCohort(app,page){
   await page.getByRole('button',{name:'Topic settings',exact:true}).click();
   await page.locator('[data-topic-storage]').filter({hasText:/Topic data · [0-9]/}).waitFor();
   await page.keyboard.press('Escape');
+  await page.locator('[data-r-action=roster-data][data-r-person]').click();
+  const personDialog=page.getByRole('dialog');
+  await personDialog.getByRole('heading',{name:second}).waitFor();
+  await personDialog.getByText('Cello',{exact:true}).waitFor();
+  await personDialog.getByText('1',{exact:true}).first().waitFor();
+  await personDialog.getByRole('button',{name:'‹ Everyone'}).click();
+  await personDialog.locator('[name=roster-field]').selectOption({label:'Performances · Calculated properties'});
+  await personDialog.locator('[name=roster-op]').selectOption('atLeast');
+  await personDialog.locator('[name=roster-value]').fill('2');
+  await personDialog.getByRole('button',{name:'Apply filter'}).click();
+  await personDialog.getByText('1 of 2 people',{exact:true}).waitFor();
+  await personDialog.getByRole('button',{name:first}).waitFor();
+  await page.keyboard.press('Escape');
   const saved=await read(),calls=await app.evaluate(()=>globalThis.nativeDiscoveredFixture.calls);
   if(!saved||saved.names.length!==1||saved.names[0]!==first||saved.known!==false||saved.stats.discovered!==2||saved.stats.missingDates!==1||
-   !saved.values.includes('Violin')||!saved.sources.includes(source)||calls.intent!==2||calls.search!==1||calls.read<1)throw Error('The installed discovery workflow did not retain the reviewed source fields and exclusions: '+JSON.stringify({saved,calls}));
+   !saved.values.includes('Violin')||!saved.sources.includes(source)||calls.intent!==2||calls.search!==3||calls.read<1)throw Error('The installed discovery workflow did not retain the reviewed source fields and exclusions: '+JSON.stringify({saved,calls}));
   await page.locator('[data-workspace=charts]').click();
-  console.log(JSON.stringify({nativePublicDataset:true,singlePrompt:true,conversationalClarification:true,modelSearchSimulated:true,sourceExample:true,independentCollectionReport:true,verifiedCsvData:true,calls}));
+  console.log(JSON.stringify({nativePublicDataset:true,singlePrompt:true,conversationalClarification:true,modelSearchSimulated:true,sourceExample:true,independentCollectionReport:true,verifiedCsvData:true,rosterRecovery:true,calculatedProperty:true,unchartedFilter:true,calls}));
  }finally{
   await page.evaluate(()=>{globalThis.fetch=globalThis.nativeOriginalDiscoveryFetch;delete globalThis.nativeOriginalDiscoveryFetch;});
   await app.evaluate(()=>{delete globalThis.nativeDiscoveredFixture;});

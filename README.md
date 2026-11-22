@@ -2,7 +2,7 @@
 
 Windows and Android installers are available from **[Releases](https://github.com/BC-works/JS-downloads/releases)**.
 
-- **Windows 10/11 x64** can use the [3.5.3 installer](https://github.com/BC-works/JS-downloads/releases/download/v3.5.3/Jyotish-Studio-Setup-3.5.3.exe). It runs with a standard user account and retains the existing Jyotish Studio Offline profile.
+- **Windows 10/11 x64** can use the [3.5.4 installer](https://github.com/BC-works/JS-downloads/releases/download/v3.5.4/Jyotish-Studio-Setup-3.5.4.exe). It runs with a standard user account and retains the existing Jyotish Studio Offline profile.
 - **Android 8.0+** can use the [3.4.2 APK](https://github.com/BC-works/JS-downloads/releases/download/v3.4.2/Jyotish-Studio-Next-Android.apk). Install it over Jyotish Studio Next to keep the app’s existing data. Use an up-to-date Android System WebView.
 
 Versions without an updater need one manual install to enable future in-app updates. Windows shows release notes before downloading, progress at the top right, then Restart to install. Android offers Download/Later in a bottom bar and an explicit Install action; Later waits until the next fresh launch. Android requires system installation confirmation.
