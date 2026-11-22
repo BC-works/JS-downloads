@@ -108,12 +108,17 @@ async function verifyDiscoveredCohort(app,page){
   const example=page.locator('.research-cohort-example');
   await example.getByText(first,{exact:false}).first().waitFor();
   await example.getByText(/Violin/).first().waitFor();
+  await page.getByText(/Estimated topic storage.*for 2 people/).waitFor();
   if(await read())throw Error('Preview committed a topic');
   await page.locator('#research-cohort-confirm').click();
   await page.locator('.research-collection-preview').waitFor({timeout:60000});
+  await page.getByText(/Retrieved data.*in this draft/).waitFor();
   if(await read())throw Error('Collection committed a topic before report approval');
   await page.locator('#research-cohort-start').click();
   await page.locator('#research-question').waitFor({timeout:60000});
+  await page.getByRole('button',{name:'Topic settings',exact:true}).click();
+  await page.locator('[data-topic-storage]').filter({hasText:/Topic data · [0-9]/}).waitFor();
+  await page.keyboard.press('Escape');
   const saved=await read(),calls=await app.evaluate(()=>globalThis.nativeDiscoveredFixture.calls);
   if(!saved||saved.names.length!==1||saved.names[0]!==first||saved.known!==false||saved.stats.discovered!==2||saved.stats.missingDates!==1||
    !saved.values.includes('Violin')||!saved.sources.includes(source)||calls.intent!==2||calls.search!==1||calls.read<1)throw Error('The installed discovery workflow did not retain the reviewed source fields and exclusions: '+JSON.stringify({saved,calls}));
