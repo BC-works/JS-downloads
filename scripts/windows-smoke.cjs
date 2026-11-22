@@ -53,11 +53,13 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
    phase='cohort and Wikidata facts';
    await verifyNativeCombinedCohort(app,page);
    phase='public dataset discovery';
-   const {verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch}=require('./research-discovered-native-smoke.cjs');
+   const {verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch,verifyLiveResearchMatrix}=require('./research-discovered-native-smoke.cjs');
    await verifyDiscoveredCohort(app,page);
    await verifyLivePublicRegister(app);
    phase='live player and career search';
    await verifyLiveCareerSearch(page);
+   phase='cross-domain public research';
+   await verifyLiveResearchMatrix(page);
    phase='native planner';
    await verifyWindowsPlanner(app,page);
   }else if(process.argv[4]==='reopen'){

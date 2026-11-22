@@ -205,4 +205,31 @@ async function verifyLiveCareerSearch(page){
  console.log(JSON.stringify({liveCareerPrompt:true,...summary}));
  await page.locator('[data-workspace=charts]').click();
 }
-module.exports={verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch};
+// Exercise the installed app endpoint with natural language and live public sources.
+// No test supplies a directory URL, an entity ID, a column mapping, or an API key.
+async function verifyLiveResearchMatrix(page){
+ const evidence={};
+ for(const prompt of ['hot musicians','MLB players and their debut','NHL players','tennis players','Nobel Prize laureates']){
+  evidence[prompt]=await page.evaluate(async prompt=>{
+   async function send(body){
+    const response=await fetch('/api/research/cohort',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const value=await response.json();
+    if(!response.ok)throw Error(prompt+' failed: '+JSON.stringify(value));
+    return value;
+   }
+   const review=await send({action:'prepare',prompt,discoverPublic:true,includeExample:true});
+   if(prompt==='hot musicians'){
+    if(review.criteria||!review.clarification?.question?.includes('hot'))throw Error('Expected a definition before any review');
+    return {question:review.clarification.question};
+   }
+   if(!review.example?.name||!review.criteria||!review.sources?.length)throw Error('Expected a sourced review for '+prompt);
+   const batch=await send({action:'page',criteria:review.criteria});
+   if(batch.people.length<10||batch.people.some(p=>!p.id||!p.name))throw Error('Unverified roster for '+prompt);
+   if(prompt.includes('debut')&&!review.data?.fields.some(f=>/debut/i.test(f.label)))throw Error('Lost the requested debut field');
+   return {example:review.example.name,peopleOnFirstPage:batch.people.length,reviewedCount:review.rosterCount??null,
+    fields:review.data?.fields.map(f=>f.label)||[],coverage:review.summary};
+  },prompt);
+ }
+ console.log(JSON.stringify({liveResearchMatrix:true,...evidence}));
+}
+module.exports={verifyDiscoveredCohort,verifyLivePublicRegister,verifyLiveCareerSearch,verifyLiveResearchMatrix};
