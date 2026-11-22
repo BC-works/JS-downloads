@@ -417,7 +417,11 @@ async function verifyTopicModel(app,page){
    await page.locator('#research-question').fill(question);
    await page.locator('#research-query-form button[type=submit]').click();
    await page.getByRole('button',{name:'Interpret with model'}).click();
-   await page.locator('.research-review').getByText('Model interpretation',{exact:true}).waitFor();
+   const review=page.locator('.research-review');
+   await review.locator('.research-review-question').waitFor();
+   const explanation=review.locator('.research-review-methods');
+   if(await explanation.getAttribute('open')===null)await explanation.locator('summary').click();
+   await explanation.getByText(/Model wording.*Points per game > 20/).waitFor();
    if(!await page.locator('[data-r-action=run-review]').isEnabled())throw Error('Model rewrite bypassed or failed local review');
   }
   const calls=await app.evaluate(()=>globalThis.topicModelQA.calls);
