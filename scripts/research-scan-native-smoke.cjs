@@ -128,7 +128,23 @@ async function checkSourceScan(page, {reopen=false}={}) {
   const saved = await dialog.getByRole('button', {name:'Resume saved check'}).waitFor().then(() => dialog.innerText());
   const persistedCount = Number(saved.match(/(\d+) profile links checked/)[1]);
   assert.ok(persistedCount>=2 && persistedCount<memberCount);
+  await dialog.evaluate(el => {
+    const minimizeWhileReading = new MutationObserver(() => {
+      if (!el.querySelector('[aria-label="Birth profile links checked"]')) return;
+      minimizeWhileReading.disconnect();
+      el.querySelector('[data-minimize]').click();
+    });
+    minimizeWhileReading.observe(el, {subtree:true, childList:true});
+  });
   await dialog.getByRole('button', {name:'Resume saved check'}).click();
+  const indicator = page.locator('.birth-check-status');
+  await indicator.waitFor({timeout:45000});
+  assert.equal(await dialog.isVisible(), false);
+  await page.locator('[data-workspace=charts]').click();
+  await page.locator('.window-title .birth-check-status[data-state=complete]').waitFor({timeout:120000});
+  assert.match(await indicator.innerText(), /18 changes to review/);
+  await indicator.click();
+  await dialog.waitFor();
   const apply = dialog.getByRole('button', {name:'Apply ' + memberCount + ' changes'});
   await apply.waitFor({timeout:120000});
   assert.equal((await scanState(page)).records.filter(row => row.known).length, 0);
@@ -148,7 +164,7 @@ async function checkSourceScan(page, {reopen=false}={}) {
   }
   await page.locator('[data-workspace=charts]').click();
   console.log(JSON.stringify({nativeAutoBirthScan:true, verifiedNativeCacheHits, persistedCount, reopen:true, restoredDraft:true, verifiedSourceClocks:after.records.length,
-    firstAndLastLinks:true, appliedAfterReview:true, persistedAfterReload:true}));
+    firstAndLastLinks:true, appliedAfterReview:true, persistedAfterReload:true, completedWhileMinimizedAcrossWorkspaces:true}));
 }
 
 module.exports = {seedSourceScan, checkSourceScan};
