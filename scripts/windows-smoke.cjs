@@ -43,7 +43,7 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
   console.log('SMOKE native Research '+process.argv[4]);
   const baseline=process.argv[4]==='baseline';
   await require('./research-native-smoke.cjs').runResearchNative(page,{
-   reopen:process.argv[4]==='reopen',expectExisting:!baseline,expectLauncher:true,expectTopicPanels:!baseline
+   reopen:process.argv[4]==='reopen',expectExisting:!baseline,expectLauncher:true,expectTopicPanels:!baseline,verifyPresentation:!baseline&&process.argv[4]==='verify'
   });
   if(process.argv[4]==='verify'){
    phase='online cohort';

@@ -19,7 +19,31 @@ async function openLabLauncher(page,{allowResume=true}={}){
  await page.locator('#research-lab-topics').waitFor();
 }
 
-async function verifyLabTopicPanels(page,topicId,{notes}){
+// Exercise the installed Electron renderer at both its full workspace size
+// and a narrow desktop window. Restore its original viewport for later checks.
+async function verifyResearchWidth(page,surface){
+ const original=page.viewportSize();
+ const display=original||await page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+ const styleErrors=await page.evaluate(()=>[...document.querySelectorAll('link[rel=stylesheet]')]
+  .filter(link=>!link.sheet?.cssRules.length).map(link=>link.getAttribute('href')));
+ if(styleErrors.length)throw Error('The desktop app could not load '+styleErrors.join(', '));
+ const samples=[];
+ try{
+  for(const width of [1440,800]){
+   await page.setViewportSize({width,height:900});
+   const sample=await page.evaluate(async()=>{
+    await document.fonts.ready;
+    await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    return {width:innerWidth,document:document.documentElement.scrollWidth};
+   });
+   samples.push(sample);
+   if(sample.document>sample.width+1)throw Error(surface+' overflows the desktop window: '+JSON.stringify(sample));
+  }
+ }finally{await page.setViewportSize(display);}
+ console.log(JSON.stringify({nativeResearchWidth:true,surface,samples}));
+}
+
+async function verifyLabTopicPanels(page,topicId,{notes,verifyPresentation=false}){
  const tabs=page.getByRole('tablist',{name:/research lab|topic views/i}).filter({has:page.getByRole('tab',{name:'Main',exact:true})});
  const main=page.getByRole('tab',{name:'Main',exact:true});
  const notesTab=page.getByRole('tab',{name:'Notes',exact:true});
@@ -31,8 +55,13 @@ async function verifyLabTopicPanels(page,topicId,{notes}){
  await addData.waitFor();
  await right.locator('[data-r-action=edit-topic-notes]').waitFor();
  for(const action of ['topic-settings','import-backup','export-project'])await right.locator(`[data-r-action=${action}]`).waitFor();
- const [leftBox,rightBox]=await Promise.all([addData.boundingBox(),right.boundingBox()]);
- if(!leftBox||!rightBox||leftBox.x+leftBox.width>=rightBox.x)throw Error('Research Lab data and topic controls are not on their expected sides');
+ const [leftBox,rightBox,windowWidth]=await Promise.all([addData.boundingBox(),right.boundingBox(),page.evaluate(()=>innerWidth)]);
+ // The full desktop has a left roster and right-aligned topic toolbar. In
+ // compact windows the toolbar wraps above the roster and current results.
+ if(!leftBox||!rightBox||rightBox.y+rightBox.height>leftBox.y+1||
+    (windowWidth>=1100&&leftBox.x+leftBox.width>=rightBox.x)){
+  throw Error('Research Lab topic controls are misplaced: '+JSON.stringify({windowWidth,leftBox,rightBox}));
+ }
  await notesTab.click();
  if(await notesTab.getAttribute('aria-selected')!=='true')throw Error('Notes tab did not become active');
  const textarea=page.locator('#research-topic-notes');
@@ -44,6 +73,7 @@ async function verifyLabTopicPanels(page,topicId,{notes}){
  await textarea.waitFor({state:'hidden'});
  await close.click();
  await page.getByRole('heading',{name:'JyotishGPT',exact:true}).waitFor();
+ if(verifyPresentation)await verifyResearchWidth(page,'Launchpad');
  if(!page.url().endsWith('#research-lab'))throw Error('Closing the topic left Research Lab');
  await page.locator('#research-question').waitFor({state:'hidden'});
  await page.locator(`[data-r-lab-topic="${topicId}"]`).click();
@@ -100,7 +130,7 @@ async function runClassicResearchNative(page,{reopen=false,legacy=false,expectEx
  console.log(JSON.stringify({nativeResearch:true,reopen,legacy,expectExisting,customOrigin:page.url(),numericWorker:true,inspectorD9:true,pinned:true,primaryWorkspace:!legacy,topicTabs:!legacy,isolatedLibraries:true,releasedWorker:true}));
 }
 
-async function runLabResearchNative(page,{reopen=false,expectExisting=false,expectLegacyPin=false,expectLauncher=false,expectTopicPanels=false}={}){
+async function runLabResearchNative(page,{reopen=false,expectExisting=false,expectLegacyPin=false,expectLauncher=false,expectTopicPanels=false,verifyPresentation=false}={}){
  const title='Native Research Smoke',datasetTitle='Native CSV evidence';
  const question='Distribution of Moon signs where Minutes played >= 10';
  const original=await page.evaluate(()=>({
@@ -138,6 +168,7 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  await page.locator('[data-workspace=research]').click();
  await page.locator(`[data-r-library-topic="${topic.id}"]`).click();
  await page.locator('#continue-research').waitFor();
+ if(verifyPresentation)await verifyResearchWidth(page,'Research library');
  if(await page.locator('#research-question').count())throw Error('Research Library exposed the Lab prompt');
  if(expectLegacyPin){
   await page.locator('[data-r-library-view=analyses]').click();
@@ -193,6 +224,18 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  },{topicId:topic.id,savedId,datasetTitle});
  if(evidence.eligible!==1||evidence.matched!==1||!evidence.dataset)throw Error('Native CSV evidence did not persist: '+JSON.stringify(evidence));
  if(await page.locator('.research-results [data-r-finding]').count()!==12)throw Error('Native Moon-sign distribution did not produce twelve categories');
+ if(verifyPresentation){
+  await verifyResearchWidth(page,'Research Lab results');
+  const datum=page.locator('.research-results [data-r-finding]').first();
+  const id=await datum.getAttribute('data-r-finding');
+  await datum.focus();
+  await page.keyboard.press('Enter');
+  const evidencePanel=page.locator('.research-evidence');
+  await evidencePanel.waitFor();
+  await evidencePanel.getByRole('button',{name:'Close evidence'}).click();
+  await evidencePanel.waitFor({state:'hidden'});
+  console.log(JSON.stringify({nativeResearchKeyboard:true,activatedFinding:id}));
+ }
  const errors=await page.locator('.research-error').allTextContents();
  if(errors.length)throw Error('Native Research failed: '+errors.join(' · '));
 
@@ -202,7 +245,7 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  await page.locator('.research-inspector svg[aria-label="D9 South Indian chart"]').waitFor();
  await page.locator('.research-inspector-positions').waitFor();
  await page.locator('[data-r-action=close-inspector]').click();
- if(expectTopicPanels)await verifyLabTopicPanels(page,topic.id,{notes:'Retained native Research notes'});
+ if(expectTopicPanels)await verifyLabTopicPanels(page,topic.id,{notes:'Retained native Research notes',verifyPresentation});
  else if(hasLauncher){
   await page.locator('#research-lab-topics-toggle').click();
   await labTopic.waitFor();
