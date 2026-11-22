@@ -45,6 +45,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
   await require('./research-native-smoke.cjs').runResearchNative(page,{
    reopen:process.argv[4]==='reopen',expectExisting:!baseline,expectLauncher:true,expectTopicPanels:!baseline,verifyPresentation:!baseline&&process.argv[4]==='verify'
   });
+  phase='research birth details and follow-up';
+  const {seedBirthTopic,checkBirthTopic}=require('./research-birth-native-smoke.cjs');
+  if(baseline)await seedBirthTopic(page);
+  else await checkBirthTopic(page,{reopen:process.argv[4]==='reopen'});
   if(process.argv[4]==='verify'){
    phase='online cohort';
    console.log('SMOKE native online cohort');

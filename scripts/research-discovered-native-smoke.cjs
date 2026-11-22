@@ -192,16 +192,47 @@ async function verifyLiveCareerSearch(page){
    if(report.prompt!==prompt)throw Error('Live topic did not retain the submitted request');
    const roster=rosterRecords(project,await store.getResearchDatasets(entry.id));
    const named=roster.people.find(person=>person.name==='Michael Jordan');
+   if(!named)throw Error('Michael Jordan disappeared from the roster');
+   const jordanChart=project.members.find(member=>member.id===named.key);
+   const input=jordanChart?.input,links=input?.source?.sources||[];
    const key=label=>roster.fields.find(f=>f.label===label)?.id;
    const games=key('Career games played'),ppg=key('Points per game');
-   return {people:roster.people.length,charted:project.members.length,noon:report.stats.unknownTimes,recordedTimes:report.stats.knownTimes,withDate:roster.people.filter(p=>p.date).length,
+   return {people:roster.people.length,charted:project.members.length,noon:report.stats.unknownTimes,recordedTimes:report.stats.knownTimes,withDate:roster.people.filter(p=>p.date).length,birthProfileCoverage:report.birthProfileCoverage||null,
      withPpg:roster.people.filter(p=>p.values.has(ppg)).length,over20InRoster:roster.people.filter(p=>p.values.has(ppg)&&Number([...p.values.get(ppg)][0])>20).length,
-     jordan:{games:[...named.values.get(games)][0],ppg:[...named.values.get(ppg)][0]},
+     jordan:{games:[...named.values.get(games)][0],ppg:[...named.values.get(ppg)][0],charted:named.charted,
+      date:input?.date,zone:input?.tz,lat:input?.lat,lon:input?.lon,known:input?.timeKnown,clock:input?.time,
+      sourceCount:links.length,sourceUrl:input?.source?.url,rating:input?.source?.reliability,publisherId:input?.source?.publisherId},
      coverage:report.criteria.description,source:report.sources.find(s=>s.url.includes('/versions/'))?.url};
   }finally{store.close();}
  },prompt);
  if(summary.people<4800||summary.charted<100||summary.withPpg<4700||summary.jordan.games!==1072||Math.abs(summary.jordan.ppg-32292/1072)>0.00001)
   throw Error('Live topic statistics failed verification: '+JSON.stringify(summary));
+ const jordan=summary.jordan;
+ if(!jordan.charted||jordan.date!=='1963-02-17'||jordan.zone!=='America/New_York'||
+    !Number.isFinite(jordan.lat)||!Number.isFinite(jordan.lon)||Math.abs(jordan.lat-40.65)>.2||
+    Math.abs(jordan.lon+73.95)>.3||!jordan.sourceCount||!jordan.sourceUrl){
+  throw Error('The live roster lost a verified birth identity: '+JSON.stringify(jordan));
+ }
+ if(jordan.known!==true&&!/^12:00(?::00)?$/.test(jordan.clock))throw Error('An unknown birth time must use qualified local noon');
+ const profiles=summary.birthProfileCoverage;
+ if(profiles&&(profiles.checked+profiles.remaining!==profiles.candidates||profiles.recorded>profiles.checked||profiles.recorded>summary.recordedTimes)){
+  throw Error('The recorded birth-profile coverage does not add up: '+JSON.stringify(profiles));
+ }
+ const publicBirthSource='https://www.astrotheme.com/astrology/Michael_Jordan';
+ if(!jordan.known||!/^13:40(?::00)?$/.test(jordan.clock)||jordan.rating!=='AA'||jordan.sourceUrl!==publicBirthSource){
+  // Control read only after collection has finished. It cannot supply the topic
+  // with the profile URL or clock and distinguishes discovery from publisher failure.
+  const source=await page.evaluate(async url=>{
+   try{
+    const r=await fetch('/api/people/profile?url='+encodeURIComponent(url),{signal:AbortSignal.timeout(35000)});
+    const data=await r.json(),details=data.profile?.details||data.profile;
+    return {status:r.status,date:details?.date,time:details?.time,rating:details?.source?.reliability,error:data.error};
+   }catch(error){return {status:0,error:error.message};}
+  },publicBirthSource);
+  console.log(JSON.stringify({birthSourceDiagnostic:true,source,actual:jordan,coverage:profiles}));
+  if(source.status!==200)throw Error('The installed app could not independently read the birth publisher. Live source verification is incomplete.');
+  throw Error('The saved chart does not carry the expected public birth record. Compare its clock and source with the diagnostic response.');
+ }
  console.log(JSON.stringify({liveCareerPrompt:true,...summary}));
  const question='What do all players with > 20ppg have in common';
  await page.getByRole('button',{name:'Ask Jyotish settings'}).waitFor();
@@ -219,11 +250,11 @@ async function verifyLiveCareerSearch(page){
    const prompt=(await store.listPromptResults(project.id)).find(q=>q.query===question);
    const {result,plan}=await store.getPromptResult(project.id,prompt.id);
    const filter=plan.dataFilter;
-   return {operator:filter.operator,value:filter.value,eligible:result.eligible,noon:result.context.birthTime.unknownIncluded,
+   return {operator:filter.operator,value:filter.value,eligible:result.eligible,known:result.context.birthTime.known,noon:result.context.birthTime.unknownIncluded,
     matched:result.context.data.matched,positiveFindings:result.findings.length,first:result.findings[0]?.label};
   }finally{store.close();}
  },question);
- if(filtered.operator!=='gt'||filtered.value!==20||!filtered.eligible||filtered.eligible!==filtered.noon||!filtered.positiveFindings)
+ if(filtered.operator!=='gt'||filtered.value!==20||!filtered.eligible||filtered.eligible!==filtered.known+filtered.noon||!filtered.positiveFindings)
   throw Error('The inline data threshold or noon eligibility failed: '+JSON.stringify(filtered));
  console.log(JSON.stringify({liveInlineTopicQuestion:true,...filtered}));
  await page.locator('[data-workspace=charts]').click();
