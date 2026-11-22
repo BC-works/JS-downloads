@@ -49,6 +49,10 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
   const {seedBirthTopic,checkBirthTopic}=require('./research-birth-native-smoke.cjs');
   if(baseline)await seedBirthTopic(page);
   else await checkBirthTopic(page,{reopen:process.argv[4]==='reopen'});
+  phase='automatic source scan';
+  const {seedSourceScan,checkSourceScan}=require('./research-scan-native-smoke.cjs');
+  if(baseline)await seedSourceScan(app,page);
+  else await checkSourceScan(page,{reopen:process.argv[4]==='reopen'});
   if(process.argv[4]==='verify'){
    phase='online cohort';
    console.log('SMOKE native online cohort');
