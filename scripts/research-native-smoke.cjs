@@ -247,6 +247,14 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   await evidencePanel.getByRole('button',{name:'Close evidence'}).click();
   await evidencePanel.waitFor({state:'hidden'});
   console.log(JSON.stringify({nativeResearchKeyboard:true,activatedFinding:id}));
+  const scope=page.locator('[data-r-followup-scope][data-r-followup-count="1"]');
+  await page.getByRole('heading',{name:'Ask about this result'}).waitFor();
+  await scope.waitFor();
+  await page.getByRole('button',{name:'Close topic',exact:true}).click();
+  await page.getByRole('heading',{name:'Subject overview'}).waitFor();
+  await savedQuestion.click();
+  await scope.waitFor();
+  console.log(JSON.stringify({nativeResearchTopicNavigation:true,scopedCharts:1,overviewOnClose:true,savedResultReopened:true}));
  }
  const errors=await page.locator('.research-error').allTextContents();
  if(errors.length)throw Error('Native Research failed: '+errors.join(' · '));
