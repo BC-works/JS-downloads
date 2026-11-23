@@ -205,6 +205,10 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   await page.locator('[data-r-action=run-review]').click();
  }
  const savedQuestion=page.locator('.research-prompt-history [data-r-prompt]').filter({hasText:question});
+ if(!topic.priorResultId){
+  await page.locator('.research-result-heading h2').filter({hasText:question}).waitFor({timeout:60000});
+  await page.getByRole('button',{name:'Close topic',exact:true}).click();
+ }
  await savedQuestion.waitFor({timeout:60000});
  const savedId=await savedQuestion.getAttribute('data-r-prompt');
  if(topic.priorResultId&&savedId!==topic.priorResultId)throw Error('Research Lab replaced the saved result during upgrade');
@@ -250,13 +254,26 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   const scope=page.locator('[data-r-followup-scope][data-r-followup-count="1"]');
   await page.getByRole('heading',{name:'Ask about this result'}).waitFor();
   await scope.waitFor();
+  await page.getByRole('heading',{name:'Previous topics'}).waitFor({state:'detached'});
+  const followupBox=await page.locator('.research-lab-followup').boundingBox();
+  const resultBox=await page.locator('.research-result-heading').boundingBox();
+  if(!followupBox||!resultBox||followupBox.x<=resultBox.x+resultBox.width)throw Error('The follow-up composer is not beside the result');
+  const followup="What nakshatras are most common among these guys, any planet doesn't matter.";
   const composer=page.locator('#research-question');
-  await composer.fill('What nakshatras are most common here');
+  await composer.fill(followup);
   await page.locator('#research-query-form button[type=submit]').click();
   await page.locator('.research-review-question').filter({hasText:'Show how often nakshatras occur.'}).waitFor();
   if(!(await page.locator('[data-r-followup-review]').innerText()).includes('1 chart'))throw Error('The query left its saved chart scope');
-  await page.getByRole('button',{name:'Close interpretation'}).click();
-  await composer.fill('');
+  await page.getByRole('button',{name:'Run analysis'}).click();
+  const subtopic=page.locator('.research-subtopic-list [data-r-prompt]').filter({hasText:followup});
+  await subtopic.waitFor({timeout:60000});
+  const subtopicId=await subtopic.getAttribute('data-r-prompt');
+  const sequence=await page.locator('[data-r-thread-step]').evaluateAll(steps=>steps.map(step=>step.dataset.rThreadStep));
+  if(sequence.length!==2||sequence[0]!==savedId||sequence[1]!==subtopicId)throw Error('The saved follow-up did not stay below its parent');
+  await page.getByRole('tab',{name:'Search topics'}).click();
+  await page.getByRole('searchbox',{name:'Search topics in this subject'}).fill('planet doesn');
+  await page.locator(`.research-topic-search-panel [data-r-prompt="${subtopicId}"]`).click();
+  await page.locator(`[data-r-thread-step="${subtopicId}"].is-active`).waitFor();
   await page.getByRole('button',{name:'Close topic',exact:true}).click();
   await page.getByRole('heading',{name:'Subject overview'}).waitFor();
   const promptBox=await page.locator('.research-lab-prompt').boundingBox();
@@ -264,7 +281,8 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   if(!promptBox||!overviewBox||promptBox.x!==overviewBox.x||promptBox.y+promptBox.height>overviewBox.y+1)throw Error('Ask Jyotish is not above the subject overview');
   await savedQuestion.click();
   await scope.waitFor();
-  console.log(JSON.stringify({nativeResearchTopicNavigation:true,scopedCharts:1,overviewOnClose:true,savedResultReopened:true,centeredComposer:true,localContextualQuery:true}));
+  console.log(JSON.stringify({nativeResearchTopicNavigation:true,scopedCharts:1,overviewOnClose:true,savedResultReopened:true,centeredComposer:true,
+   localContextualQuery:true,sideFollowup:true,threadOrder:true,topicSearch:true}));
  }
  const errors=await page.locator('.research-error').allTextContents();
  if(errors.length)throw Error('Native Research failed: '+errors.join(' · '));
