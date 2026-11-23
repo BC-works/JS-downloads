@@ -226,6 +226,18 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  if(await page.locator('.research-results [data-r-finding]').count()!==12)throw Error('Native Moon-sign distribution did not produce twelve categories');
  if(verifyPresentation){
   await verifyResearchWidth(page,'Research Lab results');
+  const plot=page.locator('.research-graph').first(),firstBar=plot.locator('.research-column').first();
+  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(255, 254, 250)'||
+     await firstBar.evaluate(el=>el.getBoundingClientRect().width)!==76)throw Error('Research graph defaults are not compact ivory');
+  await page.locator('[data-action=app-settings]').click();
+  const settings=page.getByRole('dialog',{name:'App settings'});
+  await settings.getByLabel('Graph background').selectOption('charcoal');
+  await settings.getByLabel('Graph spacing').selectOption('wide');
+  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(36, 36, 34)'||
+     await firstBar.evaluate(el=>el.getBoundingClientRect().width)!==112)throw Error('Graph settings did not update the installed app');
+  await settings.getByRole('button',{name:'Reset appearance'}).click();
+  await settings.getByRole('button',{name:'Done'}).click();
+  console.log(JSON.stringify({nativeGraphAppearance:true,defaultPaper:'ivory',compactWidth:76,liveSettings:true}));
   const datum=page.locator('.research-results [data-r-finding]').first();
   const id=await datum.getAttribute('data-r-finding');
   await datum.focus();
