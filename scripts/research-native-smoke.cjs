@@ -277,7 +277,7 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   await page.locator('#research-topic').selectOption(topic.id);
   await page.locator(`[data-r-topic-tab="${topic.id}"][aria-selected=true]`).waitFor();
  }
- await page.locator(`[data-r-prompt="${savedId}"]`).waitFor();
+ await savedQuestion.waitFor();
 
  await page.locator('[data-workspace=charts]').click();
  const after=await page.evaluate(()=>({
