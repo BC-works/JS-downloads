@@ -250,11 +250,21 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
   const scope=page.locator('[data-r-followup-scope][data-r-followup-count="1"]');
   await page.getByRole('heading',{name:'Ask about this result'}).waitFor();
   await scope.waitFor();
+  const composer=page.locator('#research-question');
+  await composer.fill('What nakshatras are most common here');
+  await page.locator('#research-query-form button[type=submit]').click();
+  await page.locator('.research-review-question').filter({hasText:'Show how often nakshatras occur.'}).waitFor();
+  if(!(await page.locator('[data-r-followup-review]').innerText()).includes('1 chart'))throw Error('The query left its saved chart scope');
+  await page.getByRole('button',{name:'Close interpretation'}).click();
+  await composer.fill('');
   await page.getByRole('button',{name:'Close topic',exact:true}).click();
   await page.getByRole('heading',{name:'Subject overview'}).waitFor();
+  const promptBox=await page.locator('.research-lab-prompt').boundingBox();
+  const overviewBox=await page.locator('.research-subject-overview').boundingBox();
+  if(!promptBox||!overviewBox||promptBox.x!==overviewBox.x||promptBox.y+promptBox.height>overviewBox.y+1)throw Error('Ask Jyotish is not above the subject overview');
   await savedQuestion.click();
   await scope.waitFor();
-  console.log(JSON.stringify({nativeResearchTopicNavigation:true,scopedCharts:1,overviewOnClose:true,savedResultReopened:true}));
+  console.log(JSON.stringify({nativeResearchTopicNavigation:true,scopedCharts:1,overviewOnClose:true,savedResultReopened:true,centeredComposer:true,localContextualQuery:true}));
  }
  const errors=await page.locator('.research-error').allTextContents();
  if(errors.length)throw Error('Native Research failed: '+errors.join(' · '));

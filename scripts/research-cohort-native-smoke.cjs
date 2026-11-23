@@ -419,7 +419,6 @@ async function verifyTopicModel(app,page){
   for(let i=0;i<2;i++){
    await page.locator('#research-question').fill(question);
    await page.locator('#research-query-form button[type=submit]').click();
-   await page.getByRole('button',{name:'Interpret with model'}).click();
    const review=page.locator('.research-review');
    await review.locator('.research-review-question').waitFor();
    const explanation=review.locator('.research-review-methods');
@@ -429,7 +428,7 @@ async function verifyTopicModel(app,page){
   }
   const calls=await app.evaluate(()=>globalThis.topicModelQA.calls);
   if(calls!==1)throw Error('Repeated question incurred another model call');
-  console.log(JSON.stringify({nativeTopicModel:true,independentModels:true,sharedEncryptedKey:true,explicitFallback:true,providerSimulated:true,modelCalls:calls}));
+  console.log(JSON.stringify({nativeTopicModel:true,independentModels:true,sharedEncryptedKey:true,automaticFallback:true,providerSimulated:true,modelCalls:calls}));
   await page.locator('[data-workspace=charts]').click();
  }finally{await app.evaluate(()=>{globalThis.fetch=globalThis.topicModelQA.original;delete globalThis.topicModelQA;});}
 }

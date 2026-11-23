@@ -19,16 +19,16 @@ jobs:
       - name: Install Playwright controller
         shell: pwsh
         run: npm install --prefix "$env:RUNNER_TEMP/pw" --ignore-scripts --no-audit --no-fund playwright@1.62.0
-      - name: Upgrade released 3.6.7 and verify search, saved charts and Research Lab
+      - name: Upgrade released 3.6.8 and verify search, saved charts and Research Lab
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $release = Get-Content 'staging/manifest.json' | ConvertFrom-Json
           $installerName = ($release.assets | Where-Object { $_.name -like 'Jyotish-Studio-Setup-*.exe' }).name
           $installer = (Resolve-Path (Join-Path 'staging/output' $installerName)).Path
-          $baseline = Join-Path $env:RUNNER_TEMP 'Jyotish-Studio-Setup-3.6.7.exe'
-          Invoke-WebRequest 'https://github.com/BC-works/JS-downloads/releases/download/v3.6.7/Jyotish-Studio-Setup-3.6.7.exe' -OutFile $baseline
-          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLower() -ne '001640c1852519abbce366cfd54fede9234504531ffaf3f82cc0dddbb9352f3d') { throw 'Baseline installer hash mismatch' }
+          $baseline = Join-Path $env:RUNNER_TEMP 'Jyotish-Studio-Setup-3.6.8.exe'
+          Invoke-WebRequest 'https://github.com/BC-works/JS-downloads/releases/download/v3.6.8/Jyotish-Studio-Setup-3.6.8.exe' -OutFile $baseline
+          if ((Get-FileHash $baseline -Algorithm SHA256).Hash.ToLower() -ne '9697984b95278456f7c3033dedaf387cfaeb7cea7b9a509dbd5fa4c50294d4e8') { throw 'Baseline installer hash mismatch' }
           $profile = Join-Path $env:APPDATA 'Jyotish Studio Offline'
           New-Item -ItemType Directory -Force $profile | Out-Null
           Set-Content (Join-Path $profile 'installer-preservation-check.txt') 'retained'
@@ -50,7 +50,7 @@ jobs:
             }
             Get-ChildItem "$env:LOCALAPPDATA/Programs" -Filter '*uninstall*.exe' -Recurse | Select-Object FullName,Length | Format-List
           }
-          Write-Host 'Installing released 3.6.7 baseline'
+          Write-Host 'Installing released 3.6.8 baseline'
           $first = Start-Process -FilePath $baseline -ArgumentList '/S' -PassThru
           if (-not $first.WaitForExit(180000)) { Dump-InstallerWindows; taskkill /PID $first.Id /T /F; throw 'First installer timed out' }
           Write-Host 'First installer finished'
@@ -58,7 +58,7 @@ jobs:
           Get-Process JyotishStudio -ErrorAction SilentlyContinue | Stop-Process -Force
           $exe = Get-ChildItem "$env:LOCALAPPDATA/Programs" -Filter JyotishStudio.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'Installed executable was not found' }
-          node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" baseline 3.6.7
+          node scripts/windows-smoke.cjs $exe.FullName "$env:RUNNER_TEMP/pw/node_modules/playwright" baseline 3.6.8
           if ($LASTEXITCODE -ne 0) { throw 'Installed app smoke test failed' }
           Write-Host 'Starting silent reinstall'
           $second = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
