@@ -168,7 +168,17 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  await page.locator('[data-workspace=research]').click();
  await page.locator(`[data-r-library-topic="${topic.id}"]`).click();
  await page.locator('#continue-research').waitFor();
- if(verifyPresentation)await verifyResearchWidth(page,'Research library');
+ if(verifyPresentation){
+  await verifyResearchWidth(page,'Research library');
+  const cover=page.locator('.research-library-layout > .research-topic-summary.research-observatory-cover');
+  const art=await cover.evaluate(async el=>{
+   const loaded=new Image();loaded.src='/assets/research/brass-observatory.webp';await loaded.decode();
+   const backdrop=getComputedStyle(el.closest('.research-page')).backgroundColor;
+   return {width:loaded.naturalWidth,backdrop,painted:getComputedStyle(el,'::before').backgroundImage.includes('brass-observatory.webp')};
+  });
+  if(!art.painted||art.width<1000||art.backdrop!=='rgb(10, 9, 11)')throw Error('The Observatory library cover did not load');
+  console.log(JSON.stringify({nativeObservatoryArtwork:true,...art}));
+ }
  if(await page.locator('#research-question').count())throw Error('Research Library exposed the Lab prompt');
  if(expectLegacyPin){
   await page.locator('[data-r-library-view=analyses]').click();
@@ -231,17 +241,17 @@ async function runLabResearchNative(page,{reopen=false,expectExisting=false,expe
  if(verifyPresentation){
   await verifyResearchWidth(page,'Research Lab results');
   const plot=page.locator('.research-graph').first(),firstBar=plot.locator('.research-column').first();
-  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(255, 254, 250)'||
-     await firstBar.evaluate(el=>el.getBoundingClientRect().width)!==76)throw Error('Research graph defaults are not compact ivory');
+  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(18, 17, 21)'||
+     await firstBar.evaluate(el=>el.getBoundingClientRect().width)!==76)throw Error('Research graph defaults are not compact Observatory');
   await page.locator('[data-action=app-settings]').click();
   const settings=page.getByRole('dialog',{name:'App settings'});
-  await settings.getByLabel('Graph background').selectOption('charcoal');
+  await settings.getByLabel('Graph background').selectOption('ivory');
   await settings.getByLabel('Graph spacing').selectOption('wide');
-  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(36, 36, 34)'||
+  if(await plot.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgb(255, 254, 250)'||
      await firstBar.evaluate(el=>el.getBoundingClientRect().width)!==112)throw Error('Graph settings did not update the installed app');
   await settings.getByRole('button',{name:'Reset appearance'}).click();
   await settings.getByRole('button',{name:'Done'}).click();
-  console.log(JSON.stringify({nativeGraphAppearance:true,defaultPaper:'ivory',compactWidth:76,liveSettings:true}));
+  console.log(JSON.stringify({nativeGraphAppearance:true,defaultPaper:'observatory',compactWidth:76,liveSettings:true}));
   const datum=page.locator('.research-results [data-r-finding]').first();
   const id=await datum.getAttribute('data-r-finding');
   await datum.focus();
