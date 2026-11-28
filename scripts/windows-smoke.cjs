@@ -24,6 +24,20 @@ let phase='launch';const watchdog=setTimeout(()=>{console.error('Native smoke ti
     try{const request=()=>backend.handle(new Request('jyotish://app/api/people/search?q=Desktop%20Test%20Person'));const r=await request(),data=await r.json(),before=calls,cached=await(await request()).json();return {status:r.status,date:data.people?.[0]?.details?.date,time:data.people?.[0]?.details?.time,cached:cached.cached,noExtraFetch:calls===before};}finally{backend.close();}
    });
    if(result.status!==200||result.date!=='1988-04-15'||result.time!=='05:00'||!result.cached||!result.noExtraFetch)throw Error('Packaged lookup fixture failed: '+JSON.stringify(result));console.log('SMOKE packaged lookup and persistent cache passed');
+   const territories=await page.evaluate(async()=>{
+    const {searchPlaces}=await import('/places.mjs');
+    const {personPlaceCountry,resolvePersonPlace}=await import('/people-search.mjs');
+    const island={place:'Jersey (United Kingdom)',country:'United Kingdom'};
+    const [manual,qualified,unspecified]=await Promise.all([
+     searchPlaces('St Helier',{country:'GB',includeRelated:true}),
+     searchPlaces('St Helier, Channel Islands'),
+     resolvePersonPlace(island),
+    ]);
+    return {jersey:manual.places.find(place=>place.countryCode==='JE')?.tz,
+     qualified:qualified.places.map(place=>place.countryCode), importCountry:personPlaceCountry(island),importSelected:Boolean(unspecified.best)};
+   });
+   if(territories.jersey!=='Europe/Jersey'||territories.qualified.join()!=='JE'||territories.importCountry!=='JE'||territories.importSelected)throw Error('Packaged territory lookup failed: '+JSON.stringify(territories));
+   console.log(JSON.stringify({nativeTerritoryLookup:true,...territories}));
   }
   phase='chart data';console.log('SMOKE chart data '+process.argv[4]);if(['seed','baseline'].includes(process.argv[4])){
    if(await page.locator('#ayan').inputValue()!=='lahiri'){
